@@ -10,14 +10,15 @@ module Bin = struct
     { context : Context.t
     ; (* Mapping from executable names to their actual path in the workspace.
          The keys are the executable names without the .exe, even on Windows. *)
-      local_bins : Path.Build.t String.Map.t
+      local_bins : Path.Build.t String.Map.t Memo.Lazy.t
     }
 
   let binary t ?hint ~loc name =
     if not (Filename.is_relative name) then
       Memo.return (Ok (Path.of_filename_relative_to_initial_cwd name))
     else
-      match String.Map.find t.local_bins name with
+      let* local_bins = Memo.Lazy.force t.local_bins in
+      match String.Map.find local_bins name with
       | Some path -> Memo.return (Ok (Path.build path))
       | None -> (
         Context.which t.context name >>| function
@@ -32,7 +33,8 @@ module Bin = struct
       Path.of_filename_relative_to_initial_cwd name
       |> Path.as_outside_build_dir_exn |> Fs_memo.file_exists
     else
-      match String.Map.find t.local_bins name with
+      let* local_bins = Memo.Lazy.force t.local_bins in
+      match String.Map.find local_bins name with
       | Some _ -> Memo.return true
       | None -> (
         Context.which t.context name >>| function
@@ -41,9 +43,13 @@ module Bin = struct
 
   let add_binaries t ~dir l =
     let local_bins =
-      List.fold_left l ~init:t.local_bins ~f:(fun acc fb ->
-          let path = File_binding.Expanded.dst_path fb ~dir:(local_bin dir) in
-          String.Map.set acc (Path.Build.basename path) path)
+      Memo.lazy_ (fun () ->
+          let+ local_bins = Memo.Lazy.force t.local_bins in
+          List.fold_left l ~init:local_bins ~f:(fun acc fb ->
+              let path =
+                File_binding.Expanded.dst_path fb ~dir:(local_bin dir)
+              in
+              String.Map.set acc (Path.Build.basename path) path))
     in
     { t with local_bins }
 
