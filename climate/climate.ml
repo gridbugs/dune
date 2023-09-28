@@ -77,7 +77,7 @@ end
 module Command_line = struct
   type t = string list
 
-  let opt_arg (t : t) (info : Info.Arg.t) : string option list =
+  let opt_arg (t : t) (info : Info.Arg.t) ~has_arg : string option list =
     print_endline (strf "getting arg %s" (List.hd info.opt_names));
     []
   ;;
@@ -270,7 +270,7 @@ module Arg = struct
 
   let flag info =
     let parse command_line =
-      match Command_line.opt_arg command_line info with
+      match Command_line.opt_arg command_line info ~has_arg:false with
       | [] -> Ok false
       | [ None ] -> Ok true
       | [ Some _ ] -> Error (`Parse_error "value passed to flag argument")
@@ -291,7 +291,7 @@ module Arg = struct
 
   let opt ?vopt (parse, print) default info =
     let parse command_line =
-      match Command_line.opt_arg command_line info with
+      match Command_line.opt_arg command_line info ~has_arg:true with
       | [] -> Ok default
       | [ Some value ] -> Result.map_error (fun msg -> `Parse_error msg) (parse value)
       | [ None ] -> Error (`Parse_error "option argument lacks value")
@@ -302,7 +302,7 @@ module Arg = struct
 
   let opt_all ?vopt (parse, print) default info =
     let parse command_line =
-      let args = Command_line.opt_arg command_line info in
+      let args = Command_line.opt_arg command_line info ~has_arg:true in
       let rec loop acc = function
         | [] -> Ok (List.rev acc)
         | x :: xs ->
