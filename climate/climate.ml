@@ -7,6 +7,10 @@ module String = struct
     include Set.Make (String)
   end
 
+  module Map = struct
+    include Map.Make (String)
+  end
+
   let lsplit2 s ~on =
     match index_opt s on with
     | None -> None
@@ -41,20 +45,43 @@ module Manpage = struct
     | `Groff
     ]
 
-  let print ?errs ?subst fmt ppf page = print_endline "TODO"
+  let print ?errs ?subst fmt ppf page = print_endline "TODO: manpage print"
 end
 
 module Info = struct
   module Arg = struct
     type t = { opt_names : string list }
   end
+
+  module Cmd = struct
+    type t =
+      { name : string
+      ; args : Arg.t list
+      ; has_args : bool
+      ; children : t list
+      }
+
+    let add_args t args = { t with args = List.append t.args args }
+
+    let with_children cmd ~args ~children =
+      let has_args, args =
+        match args with
+        | None -> false, cmd.args
+        | Some args -> true, List.append args cmd.args
+      in
+      { cmd with has_args; args; children }
+    ;;
+  end
 end
 
 module Command_line = struct
   type t = string list
 
-  let get = Sys.argv |> Array.to_list
-  let opt_arg (t : t) (info : Info.Arg.t) : string option list = []
+  let opt_arg (t : t) (info : Info.Arg.t) : string option list =
+    print_endline (strf "getting arg %s" (List.hd info.opt_names));
+    []
+  ;;
+
   let pos_arg (t : t) (info : Info.Arg.t) : string list = []
 end
 
@@ -88,7 +115,7 @@ module Term = struct
   ;;
 
   let with_used_args t =
-    print_endline "TODO";
+    print_endline "TODO: with_used_args";
     map t ~f:(fun x -> x, [])
   ;;
 
@@ -120,16 +147,91 @@ module Cmd = struct
     let info ?doc code = ()
   end
 
-  type info = unit
+  type info = Info.Cmd.t
 
-  let info ?man ?envs ?exits ?sdocs ?docs ?doc ?version name = ()
+  let info ?man ?envs ?exits ?sdocs ?docs ?doc ?version name =
+    { Info.Cmd.name; has_args = false; args = []; children = [] }
+  ;;
 
-  type 'a t = unit
+  type 'a t =
+    | Cmd of info * 'a Term.parser
+    | Group of
+        { info : info
+        ; subcommands : 'a t list
+        ; default_parser : 'a Term.parser option
+        }
 
-  let v info term = ()
-  let group ?default info cmds = ()
-  let eval_value ?catch cmd = Ok ()
-  let name cmd = "todo"
+  let v i (args, p) = Cmd (Info.Cmd.add_args i args, p)
+
+  let get_info = function
+    | Cmd (info, _) | Group { info; _ } -> info
+  ;;
+
+  let get_name t = (get_info t).name
+
+  let group ?default info subcommands =
+    let default_args, default_parser =
+      match default with
+      | None -> None, None
+      | Some (args, p) -> Some args, Some p
+    in
+    let children = List.map ~f:get_info subcommands in
+    let info = Info.Cmd.with_children info ~args:default_args ~children in
+    Group { info; subcommands; default_parser }
+  ;;
+
+  type 'a traverse =
+    { info : info
+    ; parser : 'a Term.parser
+    ; command_line : Command_line.t
+    }
+
+  let rec traverse cmd remaining_argv =
+    match cmd, remaining_argv with
+    | Cmd (info, parser), _ -> Ok { info; parser; command_line = remaining_argv }
+    | Group { info; subcommands; default_parser }, argv_first :: argv_rest ->
+      let subcommand_opt =
+        List.find_opt subcommands ~f:(fun subcommand ->
+          String.equal (get_name subcommand) argv_first)
+      in
+      (match subcommand_opt with
+       | Some subcommand -> traverse subcommand argv_rest
+       | None ->
+         (match default_parser with
+          | Some parser -> Ok { info; parser; command_line = argv_rest }
+          | None -> Error (strf "no such subcommand: %S" argv_first)))
+    | Group { info; default_parser = Some parser; _ }, [] ->
+      Ok { info; parser; command_line = [] }
+    | Group { info; default_parser = None; _ }, [] ->
+      Error (strf "subcommand %S can not be executed" info.name)
+  ;;
+
+  let eval_value ?catch cmd =
+    print_endline "evaluating";
+    match Array.to_list Sys.argv with
+    | [] -> Error ()
+    | _ :: command_line_without_exe ->
+      (match traverse cmd command_line_without_exe with
+       | Ok { info; parser; command_line } ->
+         (match parser command_line with
+          | Ok _ ->
+            print_endline "hi";
+            Ok ()
+          | Error (`Parse_error parse_error) ->
+            Printf.eprintf "Error parsing command line arguments: %s" parse_error;
+            Error ()
+          | Error (`Help _) ->
+            Printf.eprintf "<help>";
+            Error ()
+          | Error (`Error _) ->
+            print_endline "generic error";
+            Error ())
+       | Error message ->
+         Printf.eprintf "%s" message;
+         Error ())
+  ;;
+
+  let name cmd = "todo: name"
 end
 
 module Arg = struct
@@ -178,12 +280,12 @@ module Arg = struct
   ;;
 
   let alias l i =
-    print_endline "TODO";
+    print_endline "TODO: alias";
     flag i
   ;;
 
   let alias_opt l i =
-    print_endline "todo";
+    print_endline "todo: alias";
     flag i
   ;;
 
@@ -211,7 +313,11 @@ module Arg = struct
               | Error msg -> Error (`Parse_error msg)
               | Ok x -> loop (x :: acc) xs))
       in
-      loop [] args
+      Result.map
+        (function
+         | [] -> default
+         | xs -> xs)
+        (loop [] args)
     in
     [ info ], parse
   ;;
@@ -226,8 +332,16 @@ module Arg = struct
     [ info ], parse
   ;;
 
-  let pos_all (parse, print) default info = Term.const []
-  let pos_right n c v i = Term.const []
+  let pos_all (parse, print) default info =
+    print_endline "todo: pos_all";
+    Term.const []
+  ;;
+
+  let pos_right n c v i =
+    print_endline "todo: pos_right";
+    Term.const []
+  ;;
+
   let value a = a
 
   let required a =
@@ -238,7 +352,7 @@ module Arg = struct
 
   let last a =
     Term.map_result a ~f:(function
-      | [] -> Error (`Parse_error "no positional arguments")
+      | [] -> Error (`Parse_error "can't get last argument as there are no arguments")
       | xs -> Ok (List.nth xs (List.length xs - 1)))
   ;;
 
@@ -372,5 +486,5 @@ module Arg = struct
     parse, print
   ;;
 
-  let doc_alts_enum alts = "todo"
+  let doc_alts_enum alts = "todo: doc_alts_enum"
 end

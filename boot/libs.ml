@@ -88,7 +88,7 @@ let local_libraries =
   ; ("src/scheme", Some "Scheme", false, None)
   ; ("src/dune_rules", Some "Dune_rules", true, None)
   ; ("src/upgrader", Some "Dune_upgrader", false, None)
-  ; ("vendor/cmdliner/src", None, false, None)
+  ; ("climate", Some "Climate", false, None)
   ; ("otherlibs/dune-build-info/src", Some "Build_info", false,
     Some "Build_info_data")
   ; ("src/dune_rpc_impl", Some "Dune_rpc_impl", false, None)
