@@ -1,1 +1,1 @@
-val command : unit Cmdliner.Cmd.t
+val command : unit Climate.Cmd.t

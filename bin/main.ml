@@ -1,6 +1,6 @@
 open Import
 
-let all : _ Cmdliner.Cmd.t list =
+let all : _ Climate.Cmd.t list =
   let terms =
     [ Installed_libraries.command
     ; External_lib_deps.command

@@ -1,7 +1,7 @@
 open Stdune
 
 include module type of struct
-  include Cmdliner.Arg
+  include Climate.Arg
 end
 
 module Path : sig

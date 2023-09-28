@@ -20,7 +20,7 @@ open struct
 end
 
 open struct
-  open Cmdliner
+  open Climate
   module Cmd = Cmd
   module Term = Term
   module Manpage = Manpage
@@ -591,7 +591,7 @@ module Builder = struct
 
   let set_root t root = { t with root = Some root }
 
-  (** Cmdliner documentation markup language
+  (** Climate documentation markup language
       (https://erratique.ch/software/cmdliner/doc/tool_man.html#doclang)
       requires that dollar signs (ex. $(tname)) and backslashes are escaped. *)
   let docmarkup_escape s =
@@ -1253,7 +1253,7 @@ let examples = function
       `Blocks (prose :: code_lines)
     in
     let example_blocks = examples |> List.mapi ~f:block_of_example in
-    `Blocks (`S Cmdliner.Manpage.s_examples :: example_blocks)
+    `Blocks (`S Climate.Manpage.s_examples :: example_blocks)
 ;;
 
 (* Short reminders for the most used and useful commands *)

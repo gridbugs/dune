@@ -404,7 +404,7 @@ module Sections = struct
 
   let term =
     let doc = "sections that should be installed" in
-    let open Cmdliner.Arg in
+    let open Climate.Arg in
     let+ sections = value & opt (some sections_conv) None & info [ "sections" ] ~doc in
     match sections with
     | None -> All

@@ -3,7 +3,7 @@ open Import
 let info = Cmd.info "ocaml" ~doc:"Command group related to OCaml."
 
 let group =
-  Cmdliner.Cmd.group
+  Climate.Cmd.group
     info
     [ Utop.command
     ; Ocaml_merlin.command

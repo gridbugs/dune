@@ -269,7 +269,7 @@ module Dump_dot_merlin = struct
 end
 
 let group =
-  Cmdliner.Cmd.group
+  Climate.Cmd.group
     (Cmd.info "merlin" ~doc:"Command group related to merlin")
     [ Dump_config.command; Cmd.v (start_session_info "start-session") start_session_term ]
 ;;

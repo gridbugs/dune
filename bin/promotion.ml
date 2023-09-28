@@ -18,7 +18,7 @@ module Apply = struct
   let info =
     let doc = "Promote files from the last run" in
     let man =
-      [ `S Cmdliner.Manpage.s_description
+      [ `S Climate.Manpage.s_description
       ; `P
           {|Considering all actions of the form $(b,(diff a b)) that failed
            in the last run of dune, $(b,dune promotion apply) does the following:
@@ -36,7 +36,7 @@ module Apply = struct
 
   let term =
     let+ common = Common.term
-    and+ files = Arg.(value & pos_all Cmdliner.Arg.file [] & info [] ~docv:"FILE") in
+    and+ files = Arg.(value & pos_all Climate.Arg.file [] & info [] ~docv:"FILE") in
     let _config = Common.init common in
     let files_to_promote = files_to_promote ~common files in
     Diff_promotion.promote_files_registered_in_last_run files_to_promote
@@ -50,7 +50,7 @@ module Diff = struct
 
   let term =
     let+ common = Common.term
-    and+ files = Arg.(value & pos_all Cmdliner.Arg.file [] & info [] ~docv:"FILE") in
+    and+ files = Arg.(value & pos_all Climate.Arg.file [] & info [] ~docv:"FILE") in
     let config = Common.init common in
     let files_to_promote = files_to_promote ~common files in
     Scheduler.go ~common ~config (fun () -> Diff_promotion.display files_to_promote)

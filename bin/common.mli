@@ -45,40 +45,40 @@ val init
 (** [examples [("description", "dune cmd foo"); ...]] is an [EXAMPLES] manpage
     section of enumerated examples illustrating how to run the documented
     commands. *)
-val examples : (string * string) list -> Cmdliner.Manpage.block
+val examples : (string * string) list -> Climate.Manpage.block
 
 (** [command_synopsis subcommands] is a custom [SYNOPSIS] manpage section
     listing the given [subcommands]. Each subcommand is prefixed with the `dune`
     top-level command. *)
-val command_synopsis : string list -> Cmdliner.Manpage.block list
+val command_synopsis : string list -> Climate.Manpage.block list
 
-val help_secs : Cmdliner.Manpage.block list
-val footer : Cmdliner.Manpage.block
-val term : t Cmdliner.Term.t
-val term_with_default_root_is_cwd : t Cmdliner.Term.t
-val envs : Cmdliner.Cmd.Env.info list
+val help_secs : Climate.Manpage.block list
+val footer : Climate.Manpage.block
+val term : t Climate.Term.t
+val term_with_default_root_is_cwd : t Climate.Term.t
+val envs : Climate.Cmd.Env.info list
 val set_promote : t -> Dune_engine.Clflags.Promote.t -> t
-val debug_backtraces : bool Cmdliner.Term.t
-val config_from_config_file : Dune_config.Partial.t Cmdliner.Term.t
-val display_term : Dune_config.Display.t option Cmdliner.Term.t
-val context_arg : doc:string -> Dune_engine.Context_name.t Cmdliner.Term.t
+val debug_backtraces : bool Climate.Term.t
+val config_from_config_file : Dune_config.Partial.t Climate.Term.t
+val display_term : Dune_config.Display.t option Climate.Term.t
+val context_arg : doc:string -> Dune_engine.Context_name.t Climate.Term.t
 
 (** A [--build-info] command line argument that print build information
     (included in [term]) *)
-val build_info : unit Cmdliner.Term.t
+val build_info : unit Climate.Term.t
 
 val default_build_dir : string
 
 module Let_syntax : sig
-  val ( let+ ) : 'a Cmdliner.Term.t -> ('a -> 'b) -> 'b Cmdliner.Term.t
-  val ( and+ ) : 'a Cmdliner.Term.t -> 'b Cmdliner.Term.t -> ('a * 'b) Cmdliner.Term.t
+  val ( let+ ) : 'a Climate.Term.t -> ('a -> 'b) -> 'b Climate.Term.t
+  val ( and+ ) : 'a Climate.Term.t -> 'b Climate.Term.t -> ('a * 'b) Climate.Term.t
 end
 
 module Builder : sig
   type t
 
   val set_root : t -> string -> t
-  val term : t Cmdliner.Term.t
+  val term : t Climate.Term.t
 end
 
 val build : Builder.t -> t

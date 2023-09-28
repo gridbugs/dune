@@ -1,5 +1,5 @@
 open Stdune
-include Cmdliner.Arg
+include Climate.Arg
 
 include struct
   open Dune_lang

@@ -1,2 +1,2 @@
 (** dune rpc status comamnd *)
-val cmd : unit Cmdliner.Cmd.t
+val cmd : unit Climate.Cmd.t

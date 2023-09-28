@@ -39,7 +39,7 @@ include struct
 end
 
 include struct
-  open Cmdliner
+  open Climate
   module Term = Term
   module Manpage = Manpage
 
