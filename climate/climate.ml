@@ -2,20 +2,18 @@ open StdLabels
 
 module String = struct
   include String
-
-  module Set = struct
-    include Set.Make (String)
-  end
-
-  module Map = struct
-    include Map.Make (String)
-  end
+  module Set = Set.Make (String)
 
   let lsplit2 s ~on =
     match index_opt s on with
     | None -> None
     | Some i -> Some (sub s ~pos:0 ~len:i, sub s ~pos:(i + 1) ~len:(length s - i - 1))
   ;;
+end
+
+module Int = struct
+  include Int
+  module Map = Map.Make (Int)
 end
 
 let strf = Printf.sprintf
@@ -50,7 +48,10 @@ end
 
 module Info = struct
   module Arg = struct
-    type t = { opt_names : string list }
+    type t =
+      { opt_names : string list
+      ; has_arg : bool
+      }
   end
 
   module Cmd = struct
@@ -79,7 +80,10 @@ module Command_line = struct
 
   let opt_arg (t : t) (info : Info.Arg.t) ~has_arg : string option list =
     print_endline (strf "getting arg %s" (List.hd info.opt_names));
-    []
+    List.filter_map t ~f:(fun arg ->
+      if List.exists info.opt_names ~f:(fun name -> String.equal arg (strf "--%s" name))
+      then Some None
+      else None)
   ;;
 
   let pos_arg (t : t) (info : Info.Arg.t) : string list = []
@@ -167,7 +171,7 @@ module Cmd = struct
     | Cmd (info, _) | Group { info; _ } -> info
   ;;
 
-  let get_name t = (get_info t).name
+  let name t = (get_info t).name
 
   let group ?default info subcommands =
     let default_args, default_parser =
@@ -192,7 +196,7 @@ module Cmd = struct
     | Group { info; subcommands; default_parser }, argv_first :: argv_rest ->
       let subcommand_opt =
         List.find_opt subcommands ~f:(fun subcommand ->
-          String.equal (get_name subcommand) argv_first)
+          String.equal (name subcommand) argv_first)
       in
       (match subcommand_opt with
        | Some subcommand -> traverse subcommand argv_rest
@@ -231,7 +235,92 @@ module Cmd = struct
          Error ())
   ;;
 
-  let name cmd = "todo: name"
+  let completions_script t =
+    let rec make_completions_table (info : info) =
+      let all_children_names =
+        List.map info.children ~f:(fun (info : info) -> info.name)
+      in
+      let all_long_args =
+        List.concat_map info.args ~f:(fun (arg : Info.Arg.t) ->
+          List.filter_map arg.opt_names ~f:(fun name ->
+            if String.length name > 1
+            then (
+              let arg_suffix = if arg.has_arg then "=" else "" in
+              Some (strf "--%s%s" name arg_suffix))
+            else None))
+      in
+      let this_completions = List.append all_children_names all_long_args in
+      let child_completions =
+        List.concat_map info.children ~f:(fun (info : info) ->
+          List.map (make_completions_table info) ~f:(fun (subcommand, completions) ->
+            info.name :: subcommand, completions))
+      in
+      ([], this_completions) :: child_completions
+    in
+    let child_completions_by_length_desc =
+      make_completions_table (get_info t)
+      |> List.fold_left ~init:Int.Map.empty ~f:(fun acc (subcommand, completions) ->
+        let length = List.length subcommand in
+        let subcommand_string = String.concat ~sep:" " subcommand in
+        let completions_string = String.concat ~sep:" " completions in
+        let x = subcommand_string, completions_string in
+        Int.Map.update
+          length
+          (function
+           | None -> Some [ x ]
+           | Some xs -> Some (x :: xs))
+          acc)
+      |> Int.Map.to_seq
+      |> List.of_seq
+    in
+    let function_body =
+      let cases =
+        List.concat_map child_completions_by_length_desc ~f:(fun (length, completions) ->
+          if length == 0
+          then (
+            assert (List.length completions == 1);
+            let subcommand, completions = List.hd completions in
+            assert (String.length subcommand == 0);
+            [ strf
+                "  COMPREPLY=($(compgen -W \"%s\" -- \"${COMP_WORDS[1]}\"))"
+                completions
+            ])
+          else (
+            let cases =
+              List.concat_map completions ~f:(fun (subcomamnd, completions) ->
+                [ strf "      \"%s\")" subcomamnd
+                ; strf
+                    "        COMPREPLY=($(compgen -W \"%s\" -- \
+                     \"${COMP_WORDS[$COMP_CWORD]}\"))"
+                    completions
+                ; "        ;;"
+                ])
+            in
+            let prefix =
+              [ strf "  if [ \"$COMP_CWORD\" -gt %d ]; then" length
+              ; strf "    case \"${COMP_WORDS[@]:1:%d}\" in" length
+              ]
+            in
+            List.concat [ prefix; cases; [ "    esac"; "  fi" ] ]))
+      in
+      List.append
+        cases
+        [ "  if [ \"${#COMPREPLY[@]}\" -eq 1 ] && [ \"${COMPREPLY[0]:0-1}\" == \"=\" ]; \
+           then"
+        ; "     compopt -o nospace"
+        ; "  fi"
+        ]
+    in
+    let name = name t in
+    let function_name = strf "_%s_completions_generated" name in
+    String.concat
+      ~sep:"\n"
+      (List.concat
+         [ [ "#!/usr/bin/env bash"; strf "%s() {" function_name ]
+         ; function_body
+         ; [ "}"; strf "complete -F %s %s" function_name name ]
+         ])
+  ;;
 end
 
 module Arg = struct
@@ -265,11 +354,13 @@ module Arg = struct
   type 'a t = 'a Term.t
   type info = Info.Arg.t
 
-  let info ?docs ?docv ?doc ?env opt_names = { Info.Arg.opt_names }
+  let info ?docs ?docv ?doc ?env opt_names = { Info.Arg.opt_names; has_arg = false }
   let ( & ) f x = f x
 
-  let flag info =
+  let flag (info : info) =
     let parse command_line =
+      print_endline (strf "parsing flag %s" (List.hd info.opt_names));
+      print_endline (strf "Command line is: %s" (String.concat ~sep:" " command_line));
       match Command_line.opt_arg command_line info ~has_arg:false with
       | [] -> Ok false
       | [ None ] -> Ok true
@@ -290,6 +381,7 @@ module Arg = struct
   ;;
 
   let opt ?vopt (parse, print) default info =
+    let info : Info.Arg.t = { info with has_arg = true } in
     let parse command_line =
       match Command_line.opt_arg command_line info ~has_arg:true with
       | [] -> Ok default
@@ -301,6 +393,7 @@ module Arg = struct
   ;;
 
   let opt_all ?vopt (parse, print) default info =
+    let info : Info.Arg.t = { info with has_arg = true } in
     let parse command_line =
       let args = Command_line.opt_arg command_line info ~has_arg:true in
       let rec loop acc = function

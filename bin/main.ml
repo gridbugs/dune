@@ -93,7 +93,20 @@ let info =
       ]
 ;;
 
-let cmd = Cmd.group info all
+let cmd_ref = ref None
+
+let cmd =
+  Cmd.group
+    info
+    all
+    ~default:
+      (let+ print_completions =
+         Arg.(value & flag & info [ "print-completions" ] ~doc:"print completions script")
+       in
+       print_endline (Cmd.completions_script (Option.value_exn !cmd_ref)))
+;;
+
+cmd_ref := Some cmd
 
 let exit_and_flush code =
   Console.finish ();

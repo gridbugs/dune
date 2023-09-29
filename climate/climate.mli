@@ -81,6 +81,7 @@ module Cmd : sig
   val group : ?default:'a Term.t -> info -> 'a t list -> 'a t
   val eval_value : ?catch:bool -> 'a t -> (unit, unit) result
   val name : 'a t -> string
+  val completions_script : _ t -> string
 end
 
 module Arg : sig
