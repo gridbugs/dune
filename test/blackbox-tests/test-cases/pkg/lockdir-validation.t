@@ -50,3 +50,17 @@ package graph then it's caught when loading the lockdir.
   Hint: This could indicate that the lockdir is corrupted. Delete it and then
   regenerate it by running: 'dune pkg lock'
   [1]
+
+  $ cat >dune.lock/a.pkg <<EOF
+  > (deps b b)
+  > EOF
+
+  $ dune describe pkg lock
+  File "dune.lock/a.pkg", line 1, characters 8-9:
+  1 | (deps b b)
+              ^
+  Error: Package "a" in lockdir dune.lock contains duplicate dependencies on
+  package "b".
+  Hint: This could indicate that the lockdir is corrupted. Delete it and then
+  regenerate it by running: 'dune pkg lock'
+  [1]

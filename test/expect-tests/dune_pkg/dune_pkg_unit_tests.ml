@@ -56,7 +56,7 @@ let%expect_test "encode/decode round trip test for lockdir with no deps" =
 let empty_package name ~version =
   { Lock_dir.Pkg.build_command = None
   ; install_command = None
-  ; deps = []
+  ; deps = Package_name.Map.empty
   ; info =
       { Lock_dir.Pkg_info.name; version; dev = false; source = None; extra_sources = [] }
   ; exported_env = []
@@ -91,7 +91,7 @@ let%expect_test "encode/decode round trip test for lockdir with simple deps" =
           { "bar" :
               { build_command = None
               ; install_command = None
-              ; deps = []
+              ; deps = map {}
               ; info =
                   { name = "bar"
                   ; version = "0.2.0"
@@ -104,7 +104,7 @@ let%expect_test "encode/decode round trip test for lockdir with simple deps" =
           ; "foo" :
               { build_command = None
               ; install_command = None
-              ; deps = []
+              ; deps = map {}
               ; info =
                   { name = "foo"
                   ; version = "0.1.0"
@@ -171,7 +171,7 @@ let%expect_test "encode/decode round trip test for lockdir with complex deps" =
          , let pkg = empty_package name ~version:(Package_version.of_string "dev") in
            { pkg with
              install_command = None
-           ; deps = [ Loc.none, fst pkg_a ]
+           ; deps = Package_name.Map.singleton (fst pkg_a) Loc.none
            ; info =
                { pkg.info with
                  dev = true
@@ -194,7 +194,8 @@ let%expect_test "encode/decode round trip test for lockdir with complex deps" =
          ( name
          , let pkg = empty_package name ~version:(Package_version.of_string "0.2") in
            { pkg with
-             deps = [ Loc.none, fst pkg_a; Loc.none, fst pkg_b ]
+             deps =
+               Package_name.Map.of_list_exn [ fst pkg_a, Loc.none; fst pkg_b, Loc.none ]
            ; info =
                { pkg.info with
                  dev = false
@@ -223,7 +224,7 @@ let%expect_test "encode/decode round trip test for lockdir with complex deps" =
           { "a" :
               { build_command = Some [ "progn"; [ "echo"; "hello" ] ]
               ; install_command = Some [ "system"; "echo 'world'" ]
-              ; deps = []
+              ; deps = map {}
               ; info =
                   { name = "a"
                   ; version = "0.1.0"
@@ -239,7 +240,7 @@ let%expect_test "encode/decode round trip test for lockdir with complex deps" =
           ; "b" :
               { build_command = None
               ; install_command = None
-              ; deps = [ ("complex_lock_dir/b.pkg:3", "a") ]
+              ; deps = map { "a" : "complex_lock_dir/b.pkg:3" }
               ; info =
                   { name = "b"
                   ; version = "dev"
@@ -258,9 +259,10 @@ let%expect_test "encode/decode round trip test for lockdir with complex deps" =
               { build_command = None
               ; install_command = None
               ; deps =
-                  [ ("complex_lock_dir/c.pkg:3", "a")
-                  ; ("complex_lock_dir/c.pkg:3", "b")
-                  ]
+                  map
+                    { "a" : "complex_lock_dir/c.pkg:3"
+                    ; "b" : "complex_lock_dir/c.pkg:3"
+                    }
               ; info =
                   { name = "c"
                   ; version = "0.2"

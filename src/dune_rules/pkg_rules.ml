@@ -884,8 +884,8 @@ end = struct
     | Some { Lock_dir.Pkg.build_command; install_command; deps; info; exported_env } ->
       assert (Package.Name.equal name info.name);
       let* deps =
-        Memo.parallel_map deps ~f:(fun name ->
-          resolve db ctx name
+        Memo.parallel_map (Package.Name.Map.to_list deps) ~f:(fun (name, loc) ->
+          resolve db ctx (loc, name)
           >>| function
           | `Inside_lock_dir pkg -> Some pkg
           | `System_provided -> None)

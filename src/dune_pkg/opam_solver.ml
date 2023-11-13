@@ -494,7 +494,8 @@ let opam_package_to_lock_file_pkg
         opam_file.depends
     with
     | Ok dep_package_names ->
-      List.map dep_package_names ~f:(fun package_name -> Loc.none, package_name)
+      Package_name.Set.of_list dep_package_names
+      |> Package_name.Set.to_map ~f:(Fun.const Loc.none)
     | Error (`Formula_could_not_be_satisfied hints) ->
       Code_error.raise
         "Dependencies of package can't be satisfied from packages in solution"

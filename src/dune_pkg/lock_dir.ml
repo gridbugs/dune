@@ -146,7 +146,7 @@ module Pkg = struct
   type t =
     { build_command : Action.t option
     ; install_command : Action.t option
-    ; deps : (Loc.t * Package_name.t) list
+    ; deps : Loc.t Package_name.Map.t
     ; info : Pkg_info.t
     ; exported_env : String_with_vars.t Action.Env_update.t list
     }
@@ -154,7 +154,7 @@ module Pkg = struct
   let equal { build_command; install_command; deps; info; exported_env } t =
     Option.equal Action.equal_no_locs build_command t.build_command
     && Option.equal Action.equal_no_locs install_command t.install_command
-    && List.equal (Tuple.T2.equal Loc.equal Package_name.equal) deps t.deps
+    && Package_name.Map.equal deps t.deps ~equal:Loc.equal
     && Pkg_info.equal info t.info
     && List.equal
          (Action.Env_update.equal String_with_vars.equal)
@@ -167,7 +167,7 @@ module Pkg = struct
       info = Pkg_info.remove_locs t.info
     ; exported_env =
         List.map t.exported_env ~f:(Action.Env_update.map ~f:String_with_vars.remove_locs)
-    ; deps = List.map t.deps ~f:(fun (_, pkg) -> Loc.none, pkg)
+    ; deps = Package_name.Map.map t.deps ~f:(Fun.const Loc.none)
     }
   ;;
 
@@ -175,7 +175,7 @@ module Pkg = struct
     Dyn.record
       [ "build_command", Dyn.option Action.to_dyn build_command
       ; "install_command", Dyn.option Action.to_dyn install_command
-      ; "deps", Dyn.list (Dyn.pair Loc.to_dyn_hum Package_name.to_dyn) deps
+      ; "deps", Package_name.Map.to_dyn Loc.to_dyn_hum deps
       ; "info", Pkg_info.to_dyn info
       ; ( "exported_env"
         , Dyn.list (Action.Env_update.to_dyn String_with_vars.to_dyn) exported_env )
@@ -226,6 +226,31 @@ module Pkg = struct
            in
            { Pkg_info.name; version; dev; source; extra_sources }
          in
+         let deps =
+           match
+             Package_name.Map.of_list_map deps ~f:(fun (loc, package) -> package, loc)
+           with
+           | Ok deps -> deps
+           | Error (package, _first_loc, (loc, _)) ->
+             User_error.raise
+               ~loc
+               ~hints:
+                 [ Pp.concat
+                     ~sep:Pp.space
+                     [ Pp.text
+                         "This could indicate that the lockdir is corrupted. Delete it \
+                          and then regenerate it by running:"
+                     ; User_message.command "dune pkg lock"
+                     ]
+                 ]
+               [ Pp.textf
+                   "Package %S in lockdir %s contains duplicate dependencies on package \
+                    %S."
+                   (Package_name.to_string name)
+                   (Path.Source.to_string_maybe_quoted lock_dir)
+                   (Package_name.to_string package)
+               ]
+         in
          { build_command; deps; install_command; info; exported_env }
   ;;
 
@@ -249,7 +274,7 @@ module Pkg = struct
       [ field Fields.version Package_version.encode version
       ; field_o Fields.install Action.encode install_command
       ; field_o Fields.build Action.encode build_command
-      ; field_l Fields.deps Package_name.encode (List.map deps ~f:snd)
+      ; field_l Fields.deps Package_name.encode (Package_name.Map.keys deps)
       ; field_o Fields.source Source.encode source
       ; field_b Fields.dev dev
       ; field_l Fields.exported_env Action.Env_update.encode exported_env
@@ -353,7 +378,8 @@ let validate_packages packages =
   let missing_dependencies =
     Package_name.Map.values packages
     |> List.concat_map ~f:(fun (dependant_package : Pkg.t) ->
-      List.filter_map dependant_package.deps ~f:(fun (loc, dependency) ->
+      Package_name.Map.to_list dependant_package.deps
+      |> List.filter_map ~f:(fun (dependency, loc) ->
         if Package_name.Map.mem packages dependency
         then None
         else Some { dependant_package; dependency; loc }))
