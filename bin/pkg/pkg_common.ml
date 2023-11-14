@@ -179,12 +179,15 @@ let get_repos repos ~opam_repository_path ~opam_repository_url ~repositories =
            Fiber.return @@ Opam_repo.of_opam_repo_dir_path ~source:None ~repo_id path))
 ;;
 
+let find_project =
+  let open Fiber.O in
+  let+ source_dir = Memo.run (Source_tree.root ()) in
+  Source_tree.Dir.project source_dir
+;;
+
 let find_local_packages =
   let open Fiber.O in
-  let+ project =
-    let+ source_dir = Memo.run (Source_tree.root ()) in
-    Source_tree.Dir.project source_dir
-  in
+  let+ project = find_project in
   Dune_project.packages project |> Package.Name.Map.map ~f:Package.to_local_package
 ;;
 
