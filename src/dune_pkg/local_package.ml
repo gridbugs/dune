@@ -14,3 +14,7 @@ let to_opam_file { name; version; dependencies } =
   |> OpamFile.OPAM.with_depends
        (Package_dependency.list_to_opam_filtered_formula dependencies)
 ;;
+
+let opam_filtered_dependency_formula { dependencies; _ } =
+  Package_dependency.list_to_opam_filtered_formula dependencies
+;;

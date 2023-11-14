@@ -11,3 +11,6 @@ type t =
     fields of [t]. Note that this does not actually create a corresponding file
     on disk. *)
 val to_opam_file : t -> OpamFile.OPAM.t
+
+(** Returns an opam dependency formula for this package *)
+val opam_filtered_dependency_formula : t -> OpamTypes.filtered_formula
