@@ -34,6 +34,7 @@ module Pkg : sig
     ; exported_env : String_with_vars.t Action.Env_update.t list
     }
 
+  val to_dyn : t -> Dyn.t
   val equal : t -> t -> bool
   val decode : (lock_dir:Path.Source.t -> Package_name.t -> t) Decoder.t
 end

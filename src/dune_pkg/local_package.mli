@@ -8,6 +8,8 @@ type t =
   ; loc : Loc.t
   }
 
+val to_dyn : t -> Dyn.t
+
 (** [to_opam_file t] returns an [OpamFile.OPAM.t] whose fields are based on the
     fields of [t]. Note that this does not actually create a corresponding file
     on disk. *)

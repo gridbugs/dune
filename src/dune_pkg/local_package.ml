@@ -7,6 +7,15 @@ type t =
   ; loc : Loc.t
   }
 
+let to_dyn { name; version; dependencies; loc } =
+  Dyn.record
+    [ "name", Package_name.to_dyn name
+    ; "version", Dyn.option Package_version.to_dyn version
+    ; "dependencies", Dyn.list Package_dependency.to_dyn dependencies
+    ; "loc", Loc.to_dyn_hum loc
+    ]
+;;
+
 let to_opam_file { name; version; dependencies; loc = _ } =
   OpamFile.OPAM.empty
   |> OpamFile.OPAM.with_name (Package_name.to_opam_package_name name)
