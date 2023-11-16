@@ -163,3 +163,5 @@ let create local_packages lock_dir =
   let+ () = validate t in
   t
 ;;
+
+let transitive_dependency_closure { local_packages; lock_dir } start = ()
