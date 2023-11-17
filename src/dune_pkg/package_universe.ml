@@ -3,6 +3,8 @@ open! Import
 type t =
   { local_packages : Local_package.t Package_name.Map.t
   ; lock_dir : Lock_dir.t
+  ; version_by_package_name : Package_version.t Package_name.Map.t
+  ; solver_env : Solver_env.t
   }
 
 module Error = struct
@@ -87,19 +89,14 @@ module Error = struct
   ;;
 end
 
-let solver_env t =
-  Solver_stats.Expanded_variable_bindings.to_solver_env
-    t.lock_dir.expanded_solver_variable_bindings
-;;
-
 module Validation = struct
-  let version_by_package_name t =
+  let version_by_package_name local_packages (lock_dir : Lock_dir.t) =
     let from_local_packages =
-      Package_name.Map.map t.local_packages ~f:(fun local_package ->
+      Package_name.Map.map local_packages ~f:(fun (local_package : Local_package.t) ->
         Option.value local_package.version ~default:Lock_dir.Pkg_info.default_version)
     in
     let from_lock_dir =
-      Package_name.Map.map t.lock_dir.packages ~f:(fun pkg -> pkg.info.version)
+      Package_name.Map.map lock_dir.packages ~f:(fun pkg -> pkg.info.version)
     in
     let exception Duplicate_package of Package_name.t in
     try
@@ -112,42 +109,34 @@ module Validation = struct
     with
     | Duplicate_package duplicate_package_name ->
       let local_package =
-        Package_name.Map.find_exn t.local_packages duplicate_package_name
+        Package_name.Map.find_exn local_packages duplicate_package_name
       in
       let locked_package =
-        Package_name.Map.find_exn t.lock_dir.packages duplicate_package_name
+        Package_name.Map.find_exn lock_dir.packages duplicate_package_name
       in
       Error
         (Error.Duplicate_package_between_local_packages_and_lock_dir
            { local_package; locked_package })
   ;;
 
-  let concrete_dependencies_of_local_package_with_test
-    solver_env
-    version_by_package_name
-    local_package
-    =
+  let concrete_dependencies_of_local_package_with_test t local_package_name =
+    let local_package = Package_name.Map.find_exn t.local_packages local_package_name in
     Local_package.opam_filtered_dependency_formula local_package
     |> Resolve_opam_formula.filtered_formula_to_package_names
          ~stats_updater:None
          ~with_test:true
-         solver_env
-         version_by_package_name
+         t.solver_env
+         t.version_by_package_name
     |> Result.map_error ~f:(function `Formula_could_not_be_satisfied hints ->
       Error.Local_package_dependencies_unsatisfied_by_lock_dir { local_package; hints })
     |> Result.map ~f:Package_name.Set.of_list
   ;;
 
-  let all_non_local_dependencies_of_local_packages t version_by_package_name =
+  let all_non_local_dependencies_of_local_packages t =
     let open Result.O in
-    let solver_env = solver_env t in
     let+ all_dependencies_of_local_packages =
-      Package_name.Map.values t.local_packages
-      |> List.map
-           ~f:
-             (concrete_dependencies_of_local_package_with_test
-                solver_env
-                version_by_package_name)
+      Package_name.Map.keys t.local_packages
+      |> List.map ~f:(concrete_dependencies_of_local_package_with_test t)
       |> Result.List.all
       |> Result.map ~f:Package_name.Set.union_all
     in
@@ -190,21 +179,29 @@ module Validation = struct
 
   let validate t =
     let open Result.O in
-    version_by_package_name t
-    >>= all_non_local_dependencies_of_local_packages t
+    all_non_local_dependencies_of_local_packages t
     >>= check_for_unnecessary_packges_in_lock_dir t
   ;;
 end
 
 let create local_packages lock_dir =
   let open Result.O in
-  let t = { local_packages; lock_dir } in
+  let* version_by_package_name =
+    Validation.version_by_package_name local_packages lock_dir
+  in
+  let solver_env =
+    Solver_stats.Expanded_variable_bindings.to_solver_env
+      lock_dir.expanded_solver_variable_bindings
+  in
+  let t = { local_packages; lock_dir; version_by_package_name; solver_env } in
   let+ () = Validation.validate t in
   t
 ;;
 
-let assert_validated f t =
-  match f t with
+let concrete_dependencies_of_local_package_with_test t local_package_name =
+  match
+    Validation.concrete_dependencies_of_local_package_with_test t local_package_name
+  with
   | Ok x -> x
   | Error e ->
     Code_error.raise
@@ -212,26 +209,14 @@ let assert_validated f t =
       [ "error", Error.to_dyn e ]
 ;;
 
-let version_by_package_name = assert_validated Validation.version_by_package_name
-
-let concrete_dependencies_of_local_package_with_test solver_env version_by_package_name =
-  assert_validated
-    (Validation.concrete_dependencies_of_local_package_with_test
-       solver_env
-       version_by_package_name)
-;;
-
-let concrete_dependencies_of_local_package_without_test
-  solver_env
-  version_by_package_name
-  local_package
-  =
+let concrete_dependencies_of_local_package_without_test t local_package_name =
+  let local_package = Package_name.Map.find_exn t.local_packages local_package_name in
   Local_package.opam_filtered_dependency_formula local_package
   |> Resolve_opam_formula.filtered_formula_to_package_names
        ~stats_updater:None
        ~with_test:false
-       solver_env
-       version_by_package_name
+       t.solver_env
+       t.version_by_package_name
   |> function
   | Ok x -> Package_name.Set.of_list x
   | Error (`Formula_could_not_be_satisfied hints) ->
@@ -243,46 +228,44 @@ let concrete_dependencies_of_local_package_without_test
        :: List.map hints ~f:Resolve_opam_formula.Unsatisfied_formula_hint.pp)
 ;;
 
-let transitive_dependency_closure_without_test ({ local_packages; lock_dir } as t) start =
-  let concrete_dependencies_of_local_package_without_test =
-    concrete_dependencies_of_local_package_without_test
-      (solver_env t)
-      (version_by_package_name t)
+let local_transitive_dependency_closure_without_test t start =
+  let to_visit = Queue.create () in
+  let push_set = Package_name.Set.iter ~f:(Queue.push to_visit) in
+  push_set start;
+  let rec loop seen =
+    match Queue.pop to_visit with
+    | None -> seen
+    | Some node ->
+      let deps = concrete_dependencies_of_local_package_without_test t node in
+      let local_unseen_deps =
+        Package_name.Set.(
+          diff deps seen |> filter ~f:(Package_name.Map.mem t.local_packages))
+      in
+      push_set local_unseen_deps;
+      loop (Package_name.Set.union seen local_unseen_deps)
   in
+  loop start
+;;
+
+let transitive_dependency_closure_without_test t start =
   let local_package_names = Package_name.Set.of_keys t.local_packages in
   let local_transitive_dependency_closure =
-    let to_visit = Queue.create () in
-    let push_set = Package_name.Set.iter ~f:(Queue.push to_visit) in
-    push_set Package_name.Set.(inter local_package_names start);
-    let rec loop seen =
-      match Queue.pop to_visit with
-      | None -> seen
-      | Some node ->
-        let local_package = Package_name.Map.find_exn t.local_packages node in
-        let deps = concrete_dependencies_of_local_package_without_test local_package in
-        let local_unseen_deps =
-          Package_name.Set.(diff deps seen |> inter local_package_names)
-        in
-        push_set local_unseen_deps;
-        loop (Package_name.Set.union seen local_unseen_deps)
-    in
-    loop start
+    local_transitive_dependency_closure_without_test
+      t
+      (Package_name.Set.inter local_package_names start)
   in
   let non_local_transitive_dependency_closure =
-    let non_local_dependencies_of_local_transitive_dependency_closure =
+    let non_local_immediate_dependencies_of_local_transitive_dependency_closure =
       Package_name.Set.to_list local_transitive_dependency_closure
       |> Package_name.Set.union_map ~f:(fun name ->
-        let local_package = Package_name.Map.find_exn local_packages name in
-        let all_deps =
-          concrete_dependencies_of_local_package_without_test local_package
-        in
+        let all_deps = concrete_dependencies_of_local_package_without_test t name in
         Package_name.Set.diff all_deps local_package_names)
     in
     Lock_dir.transitive_dependency_closure
-      lock_dir
+      t.lock_dir
       Package_name.Set.(
         union
-          non_local_dependencies_of_local_transitive_dependency_closure
+          non_local_immediate_dependencies_of_local_transitive_dependency_closure
           (diff start local_package_names))
     |> function
     | Ok x -> x
@@ -298,9 +281,9 @@ let transitive_dependency_closure_without_test ({ local_packages; lock_dir } as 
     non_local_transitive_dependency_closure
 ;;
 
-let contains_package { local_packages; lock_dir } package_name =
-  let in_local_packages = Package_name.Map.mem local_packages package_name in
-  let in_lock_dir = Package_name.Map.mem lock_dir.packages package_name in
+let contains_package t package_name =
+  let in_local_packages = Package_name.Map.mem t.local_packages package_name in
+  let in_lock_dir = Package_name.Map.mem t.lock_dir.packages package_name in
   in_local_packages || in_lock_dir
 ;;
 
@@ -316,13 +299,38 @@ let check_contains_package t package_name =
 
 let all_dependencies t package ~traverse =
   check_contains_package t package;
-  let immediate_deps =
-    concrete_dependencies_of_local_package_with_test
-      (solver_env t)
-      (version_by_package_name t)
-      (Package_name.Map.find_exn t.local_packages package)
-  in
+  let immediate_deps = concrete_dependencies_of_local_package_with_test t package in
   match traverse with
   | `Immediate -> immediate_deps
   | `Transitive -> transitive_dependency_closure_without_test t immediate_deps
+;;
+
+let non_test_dependencies t package ~traverse =
+  check_contains_package t package;
+  match traverse with
+  | `Immediate -> concrete_dependencies_of_local_package_without_test t package
+  | `Transitive ->
+    transitive_dependency_closure_without_test t (Package_name.Set.singleton package)
+;;
+
+let test_only_dependencies t package ~traverse =
+  Package_name.Set.diff
+    (all_dependencies t package ~traverse)
+    (non_test_dependencies t package ~traverse)
+;;
+
+let opam_package_dependencies_of_package t package ~which ~traverse =
+  let get_deps =
+    match which with
+    | `All -> all_dependencies
+    | `Non_test -> non_test_dependencies
+    | `Test_only -> test_only_dependencies
+  in
+  get_deps t package ~traverse
+  |> Package_name.Set.to_list
+  |> List.map ~f:(fun package_name ->
+    OpamPackage.create
+      (Package_name.to_opam_package_name package_name)
+      (Package_name.Map.find_exn t.version_by_package_name package_name
+       |> Package_version.to_opam_package_version))
 ;;

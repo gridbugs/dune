@@ -3,10 +3,7 @@ open! Import
 (** All of the packages in a dune project including local packages and packages
     in a lockdir. The lockdir is guaranteed to contain a valid dependency
     solution for the local packages. *)
-type t = private
-  { local_packages : Local_package.t Package_name.Map.t
-  ; lock_dir : Lock_dir.t
-  }
+type t
 
 module Error : sig
   type t =
@@ -24,3 +21,10 @@ module Error : sig
 end
 
 val create : Local_package.t Package_name.Map.t -> Lock_dir.t -> (t, Error.t) result
+
+val opam_package_dependencies_of_package
+  :  t
+  -> Package_name.t
+  -> which:[ `All | `Non_test | `Test_only ]
+  -> traverse:[ `Immediate | `Transitive ]
+  -> OpamPackage.t list
