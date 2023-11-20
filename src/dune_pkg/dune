@@ -21,6 +21,7 @@
   build_info
   zeroinstall_solver
   fmt
-  xdg)
+  xdg
+  sha)
  (instrumentation
   (backend bisect_ppx)))

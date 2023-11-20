@@ -56,7 +56,8 @@ let all_non_local_dependencies_of_local_packages t version_by_package_name =
   let+ all_dependencies_of_local_packages =
     Package_name.Map.values t.local_packages
     |> List.map ~f:(fun (local_package : Local_package.t) ->
-      Local_package.opam_filtered_dependency_formula local_package
+      Local_package.(
+        for_solver local_package |> For_solver.opam_filtered_dependency_formula)
       |> Resolve_opam_formula.filtered_formula_to_package_names
            ~stats_updater:None
            ~with_test:true
