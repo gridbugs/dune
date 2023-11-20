@@ -59,7 +59,7 @@ Remove the file but corrupt the lockdir metadata file.
   $ echo foo >> dune.lock/lock.dune
   $ dune pkg validate-lockdir
   Failed to parse lockdir dune.lock:
-  File "dune.lock/lock.dune", line 6, characters 0-3:
+  File "dune.lock/lock.dune", line 9, characters 0-3:
   Error: S-expression of the form (<name> <values>...) expected
   
   Error: Some lockdirs do not contain solutions for local packages:

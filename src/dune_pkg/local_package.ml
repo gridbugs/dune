@@ -8,6 +8,20 @@ type t =
   ; loc : Loc.t
   }
 
+module Dependency_hash = struct
+  type t = Sha512.t
+
+  let to_string = Sha512.to_hex
+  let equal = Sha512.equal
+  let to_dyn t = Dyn.string (to_string t)
+  let encode t = to_string t |> Encoder.string
+
+  let decode =
+    let open Decoder in
+    string >>| Sha512.of_hex
+  ;;
+end
+
 module Dependency_set = struct
   type t = Package_constraint.Set.t Package_name.Map.t
 
@@ -44,10 +58,10 @@ module Dependency_set = struct
     package_dependencies t |> Dune_lang.Encoder.list Package_dependency.encode
   ;;
 
-  let hash_hex_or_empty t =
+  let hash_or_empty t =
     if Package_name.Map.is_empty t
     then Error `Empty
-    else Ok (encode_for_hash t |> Dune_sexp.to_string |> Sha512.string |> Sha512.to_hex)
+    else Ok (encode_for_hash t |> Dune_sexp.to_string |> Sha512.string)
   ;;
 end
 
@@ -66,6 +80,14 @@ module For_solver = struct
 
   let opam_filtered_dependency_formula { dependencies; _ } =
     Package_dependency.list_to_opam_filtered_formula dependencies
+  ;;
+
+  let dependency_set { dependencies; _ } = Dependency_set.of_list dependencies
+  let list_dependency_set ts = List.map ts ~f:dependency_set |> Dependency_set.union_all
+
+  let list_non_local_dependency_set ts =
+    List.fold_left ts ~init:(list_dependency_set ts) ~f:(fun acc { name; _ } ->
+      Package_name.Map.remove acc name)
   ;;
 end
 

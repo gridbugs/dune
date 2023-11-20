@@ -683,6 +683,7 @@ let solve_lock_dir
           in
           Lock_dir.create_latest_version
             pkgs_by_name
+            ~local_packages:(Package_name.Map.values local_packages)
             ~ocaml
             ~repos:(Some repos)
             ~expanded_solver_variable_bindings

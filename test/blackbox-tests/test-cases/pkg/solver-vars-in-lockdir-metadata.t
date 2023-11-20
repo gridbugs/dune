@@ -55,12 +55,18 @@ Solve packages with no variables set.
   - static-deps.1.0
   (lang package 0.1)
   
+  (dependency_hash
+   43fcc9485a5e111b45c5db92d74f376189b335ed609b0927e2e5db008771043cb920d12852d1f04a4b73259faa09c73d74d6f1e44696424c4ab26e042fdd5baf)
+  
   (repositories
    (complete false)
    (used))
   Solution for dune.lock:
   - dynamic-deps.1.0
   (lang package 0.1)
+  
+  (dependency_hash
+   45a43cc92c168486c8b70db658f4f40659a6c2458e35d9eda34e689b4e76e187ad331e10f585831d3f50ba341e2cf97241fa3ed7eb22646b556c91a7936dd46f)
   
   (repositories
    (complete false)
@@ -71,6 +77,9 @@ Solve packages with no variables set.
   Solution for dune.lock:
   - dynamic-deps-lazy.1.0
   (lang package 0.1)
+  
+  (dependency_hash
+   cd04087f5618d3236976327edd2590216b3cce21a82d121aef5bfd2316688d41e02d5e281df32bb8edabf85590b56d27d6e7453af48cb17a1ebab732a9b4aeeb)
   
   (repositories
    (complete false)
@@ -98,12 +107,18 @@ Solve the packages again, this time with the variables set.
   - static-deps.1.0
   (lang package 0.1)
   
+  (dependency_hash
+   43fcc9485a5e111b45c5db92d74f376189b335ed609b0927e2e5db008771043cb920d12852d1f04a4b73259faa09c73d74d6f1e44696424c4ab26e042fdd5baf)
+  
   (repositories
    (complete false)
    (used))
   Solution for dune.lock:
   - dynamic-deps.1.0
   (lang package 0.1)
+  
+  (dependency_hash
+   45a43cc92c168486c8b70db658f4f40659a6c2458e35d9eda34e689b4e76e187ad331e10f585831d3f50ba341e2cf97241fa3ed7eb22646b556c91a7936dd46f)
   
   (repositories
    (complete false)
@@ -116,6 +131,9 @@ Solve the packages again, this time with the variables set.
   Solution for dune.lock:
   - dynamic-deps-lazy.1.0
   (lang package 0.1)
+  
+  (dependency_hash
+   cd04087f5618d3236976327edd2590216b3cce21a82d121aef5bfd2316688d41e02d5e281df32bb8edabf85590b56d27d6e7453af48cb17a1ebab732a9b4aeeb)
   
   (repositories
    (complete false)
