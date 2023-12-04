@@ -10,5 +10,8 @@ it in a dune-project file.
   >  (depends foo.1.2.3))
   > EOF
 
-  $ dune pkg lock 2>&1 | head -n1
-  Error: exception Failure("Invalid character in package name \"foo.1.2.3\"")
+  $ dune pkg lock
+  Error: Package name "foo.1.2.3" is not a valid opam package name.
+  Package names can contain letters, numbers, '-', '_' and '+', and need to
+  contain at least a letter.
+  [1]
