@@ -99,17 +99,34 @@ module Lock_dir = struct
       ;;
     end)
 
+  let select_lock_dir lock_dir_selection =
+    let* workspace = Workspace.workspace () in
+    let* polled_solver_env =
+      Memo.of_non_reproducible_fiber
+        (Sys_poll.solver_env_from_current_system ~path:(Env_path.path Env.initial))
+    in
+    let sw_expander ~source pform =
+      let variable_value =
+        Solver_env.expand_pform_non_pkg polled_solver_env ~source pform
+      in
+      Memo.return [ Value.String variable_value ]
+    in
+    Workspace.Lock_dir_selection.eval lock_dir_selection ~dir:workspace.dir ~f:sw_expander
+  ;;
+
   let get_path ctx =
-    let+ workspace = Workspace.workspace () in
+    let* workspace = Workspace.workspace () in
     match
       List.find_map workspace.contexts ~f:(fun ctx' ->
         match Context_name.equal (Workspace.Context.name ctx') ctx with
         | false -> None
         | true -> Some ctx')
     with
-    | None -> Some default_path
-    | Some (Default { lock_dir; _ }) -> Some (Option.value lock_dir ~default:default_path)
-    | Some (Opam _) -> None
+    | None -> Memo.return (Some default_path)
+    | Some (Default { lock_dir = Some lock_dir_selection; _ }) ->
+      select_lock_dir lock_dir_selection >>| Option.some
+    | Some (Default { lock_dir = None; _ }) -> Memo.return (Some default_path)
+    | Some (Opam _) -> Memo.return None
   ;;
 
   let get_workspace_lock_dir ctx =

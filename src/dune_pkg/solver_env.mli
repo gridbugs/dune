@@ -22,3 +22,4 @@ val with_defaults : t
 val pp : t -> 'a Pp.t
 val unset_multi : t -> Variable_name.Set.t -> t
 val to_env : t -> OpamFilter.env
+val expand_pform_non_pkg : t -> string String_with_vars.expander

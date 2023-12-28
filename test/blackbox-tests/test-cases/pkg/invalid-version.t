@@ -10,7 +10,7 @@ In this case we could also hint at the correct syntax for dune-project files.
   > (lang dune 3.13)
   > (package
   >  (name invalid)
-  >  (depends foo.1.2.3))
+  >  (depends foo))
   > EOF
   $ cat >dune-workspace <<EOF
   > (lang dune 3.13)

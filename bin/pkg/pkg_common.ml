@@ -127,6 +127,11 @@ module Lock_dirs_arg = struct
     | All
     | Selected of Path.Source.t list
 
+  let to_dyn = function
+    | All -> Dyn.variant "All" []
+    | Selected paths -> Dyn.variant "Selected" [ Dyn.list Path.Source.to_dyn paths ]
+  ;;
+
   let term =
     Common.one_of
       (let+ arg =

@@ -194,10 +194,35 @@ let sys_ocaml_version ~path =
     Process.run_capture_line ~display:Quiet Strict ocamlc [ "-vnum" ] >>| Option.some
 ;;
 
+let get_config_variable_override =
+  let configs =
+    [ Variable_name.arch, "arch"
+    ; Variable_name.os, "os"
+    ; Variable_name.os_version, "os_version"
+    ; Variable_name.os_distribution, "os_distribution"
+    ; Variable_name.os_family, "os_family"
+    ; Variable_name.sys_ocaml_version, "sys_ocaml_version"
+    ]
+    |> Variable_name.Map.of_list_map_exn ~f:(fun (variable_name, config_name) ->
+      let config =
+        Dune_config.Config.make
+          ~name:config_name
+          ~of_string:(fun s -> Ok (Some (Variable_value.string s)))
+          ~default:None
+      in
+      variable_name, config)
+  in
+  fun variable_name ->
+    Variable_name.Map.find configs variable_name |> Option.bind ~f:Dune_config.Config.get
+;;
+
 let solver_env_from_current_system ~path =
   let entry k f =
-    let+ v = f ~path in
-    k, Option.map v ~f:Variable_value.string
+    match get_config_variable_override k with
+    | Some _ as variable_value -> Fiber.return (k, variable_value)
+    | None ->
+      let+ v = f ~path in
+      k, Option.map v ~f:Variable_value.string
   in
   (* TODO this will rerun `uname` multiple times with the same arguments
      unless it is memoized *)

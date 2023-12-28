@@ -100,26 +100,61 @@ let make_stderr () = Process.Io.make_stderr ~output_on_success:Swallow ~output_l
 (* to avoid Git translating its CLI *)
 let env = Env.add Env.initial ~var:"LC_ALL" ~value:"C"
 
+let handle_git_error git command dir fiber =
+  let stderr_path = Temp.create File ~prefix:"dune" ~suffix:"output" in
+  let stderr_to = Process.Io.file stderr_path Out in
+  let out =
+    Fiber.with_error_handler
+      ~on_error:(fun _bt ->
+        let stderr = Io.read_file stderr_path in
+        Temp.destroy File stderr_path;
+        Code_error.raise
+          "failed to run git command"
+          [ "dir", Path.to_dyn dir
+          ; "git", Path.to_dyn git
+          ; "args", Dyn.string (String.concat ~sep:" " command)
+          ; "stderr", Dyn.string stderr
+          ])
+      (fun () -> fiber stderr_to)
+  in
+  Temp.destroy File stderr_path;
+  out
+;;
+
 let run { dir } =
   let stdout_to = make_stdout () in
-  let stderr_to = make_stderr () in
   let git = Lazy.force Vcs.git in
-  Process.run ~dir ~display ~stdout_to ~stderr_to ~env failure_mode git
+  fun command ->
+    handle_git_error git command dir (fun stderr_to ->
+      Process.run ~dir ~display ~stdout_to ~stderr_to ~env failure_mode git command)
 ;;
 
 let run_capture_line { dir } =
   let git = Lazy.force Vcs.git in
-  Process.run_capture_line ~dir ~display ~env failure_mode git
+  fun command ->
+    handle_git_error git command dir (fun stderr_to ->
+      Process.run_capture_line ~dir ~display ~stderr_to ~env failure_mode git command)
 ;;
 
 let run_capture_lines { dir } =
   let git = Lazy.force Vcs.git in
-  Process.run_capture_lines ~dir ~display ~env failure_mode git
+  fun command ->
+    handle_git_error git command dir (fun stderr_to ->
+      Process.run_capture_lines ~dir ~display ~stderr_to ~env failure_mode git command)
 ;;
 
 let run_capture_zero_separated_lines { dir } =
   let git = Lazy.force Vcs.git in
-  Process.run_capture_zero_separated ~dir ~display ~env failure_mode git
+  fun command ->
+    handle_git_error git command dir (fun stderr_to ->
+      Process.run_capture_zero_separated
+        ~dir
+        ~display
+        ~stderr_to
+        ~env
+        failure_mode
+        git
+        command)
 ;;
 
 let mem { dir } ~rev =
@@ -439,6 +474,7 @@ let query_head_branch =
 ;;
 
 let branch_of_refspec refspec =
+  print_endline (sprintf "refspec %s" refspec);
   refspec
   |> String.drop_prefix_if_exists ~prefix:"+"
   |> String.lsplit2 ~on:':'
@@ -450,6 +486,8 @@ let read_head_branch =
   let fetch_line = Re.(compile @@ seq [ str "fetch = "; group (rep1 any); eol ]) in
   fun t handle ->
     let headline = sprintf {|[remote "%s"]|} handle in
+    print_endline (sprintf "headline %s" headline);
+    print_endline (sprintf "dir %s" (Path.to_dyn t.dir |> Dyn.to_string));
     let path = Path.relative t.dir "config" in
     let lines = Io.lines_of_file path in
     let _front, back =
@@ -494,6 +532,8 @@ let add_repo ({ dir } as t) ~source ~branch =
       | true, Some branch -> Fiber.return branch
       | true, None ->
         let head_branch = read_head_branch t handle in
+        print_endline
+          (sprintf "ccc %s" (Dyn.option Dyn.string head_branch |> Dyn.to_string));
         (match head_branch with
          | Some head_branch -> Fiber.return head_branch
          | None ->
@@ -508,7 +548,9 @@ let add_repo ({ dir } as t) ~source ~branch =
         let* head_branch = query_head_branch t source in
         let branch =
           match head_branch with
-          | Some head_branch -> head_branch
+          | Some head_branch ->
+            print_endline "xxx";
+            head_branch
           | None ->
             User_error.raise
               ~hints:

@@ -174,6 +174,7 @@ let of_git_repo ~update (source : Source.t) =
         | Some (Branch b) -> Some b
         | _ -> None
       in
+      print_endline (sprintf "bbb %s" (Dyn.option Dyn.string branch |> Dyn.to_string));
       let* remote = Rev_store.add_repo repo ~source:source.url ~branch in
       match update with
       | true -> Rev_store.Remote.update remote

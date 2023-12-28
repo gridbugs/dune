@@ -82,3 +82,19 @@ let to_env t variable =
     let variable_name = OpamVariable.Full.variable variable |> Variable_name.of_opam in
     get t variable_name |> Option.map ~f:Variable_value.to_opam_variable_contents
 ;;
+
+let expand_pform_non_pkg t ~(source : Dune_sexp.Template.Pform.t) pform =
+  let get_string variable_name =
+    match get t (Variable_name.of_string variable_name) with
+    | None ->
+      User_error.raise ~loc:source.loc [ Pp.textf "Variable %S is unset." variable_name ]
+    | Some value -> Variable_value.to_string value
+  in
+  match (pform : Pform.t) with
+  | Macro _ -> User_error.raise ~loc:source.loc [ Pp.text "Macros may not be used here." ]
+  | Var Pform.Var.System ->
+    let os = get_string "os" in
+    if String.equal os "macos" then "macosx" else os
+  | Var Pform.Var.Architecture -> get_string "arch"
+  | Var _ -> User_error.raise ~loc:source.loc [ Pp.text "Variable may not be used here." ]
+;;
