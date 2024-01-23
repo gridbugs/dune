@@ -77,6 +77,7 @@ type t =
   ; synopsis : string option
   ; description : string option
   ; depends : Dependency.t list
+  ; depends_plang : Dune_lang.Plang.t list
   ; conflicts : Dependency.t list
   ; depopts : Dependency.t list
   ; info : Package_info.t
@@ -122,6 +123,7 @@ let encode
   ; synopsis
   ; description
   ; depends
+  ; depends_plang
   ; conflicts
   ; depopts
   ; info
@@ -142,6 +144,7 @@ let encode
         ; field_o "synopsis" string synopsis
         ; field_o "description" string description
         ; field_l "depends" Dependency.encode depends
+        ; field_l "depends_plang" Dune_lang.Plang.encode depends_plang
         ; field_l "conflicts" Dependency.encode conflicts
         ; field_l "depopts" Dependency.encode depopts
         ; field_o "version" Package_version.encode version
@@ -186,6 +189,8 @@ let decode =
            "version"
            (Dune_lang.Syntax.since Stanza.syntax (2, 5) >>> Package_version.decode)
        and+ depends = field ~default:[] "depends" (repeat Dependency.decode)
+       and+ depends_plang =
+         field ~default:[] "depends_plang" (repeat Dune_lang.Plang.decode)
        and+ conflicts = field ~default:[] "conflicts" (repeat Dependency.decode)
        and+ depopts = field ~default:[] "depopts" (repeat Dependency.decode)
        and+ info = Package_info.decode ~since:(2, 0) ()
@@ -219,6 +224,7 @@ let decode =
        ; synopsis
        ; description
        ; depends
+       ; depends_plang
        ; conflicts
        ; depopts
        ; info
@@ -246,6 +252,7 @@ let to_dyn
   ; synopsis
   ; description
   ; depends
+  ; depends_plang
   ; conflicts
   ; depopts
   ; info
@@ -265,6 +272,7 @@ let to_dyn
     ; "synopsis", option string synopsis
     ; "description", option string description
     ; "depends", list Dependency.to_dyn depends
+    ; "depends_plang", list Dune_lang.Plang.to_dyn depends_plang
     ; "conflicts", list Dependency.to_dyn conflicts
     ; "depopts", list Dependency.to_dyn depopts
     ; "info", Package_info.to_dyn info
@@ -290,6 +298,13 @@ let default name dir =
     ; { name = Name.of_string "dune"; constraint_ = None }
     ]
   in
+  let depends_plang =
+    [ Dune_lang.Plang.Dependency
+        { package_name = Name.of_string "ocaml"; constraint_ = None }
+    ; Dune_lang.Plang.Dependency
+        { package_name = Name.of_string "dune"; constraint_ = None }
+    ]
+  in
   let id = { Id.name; dir } in
   { id
   ; loc = Loc.none
@@ -297,6 +312,7 @@ let default name dir =
   ; synopsis = Some "A short synopsis"
   ; description = Some "A longer description"
   ; depends
+  ; depends_plang
   ; conflicts = []
   ; info = Package_info.empty
   ; depopts = []
@@ -370,6 +386,7 @@ let load_opam_file file name =
   ; version = get_one "version" |> Option.map ~f:Package_version.of_string
   ; conflicts = []
   ; depends = []
+  ; depends_plang = []
   ; depopts = []
   ; info =
       Package_info.create

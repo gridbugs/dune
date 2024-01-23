@@ -32,3 +32,4 @@ module Visibility = Visibility
 module Dep_conf = Dep_conf
 module Relop = Relop
 module Cond = Cond
+module Plang = Plang
