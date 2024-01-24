@@ -1,5 +1,41 @@
 open! Stdune
 
+module Version_spec = struct
+  type t =
+    { relop : Relop.t
+    ; value : String_with_vars.t
+    }
+
+  let to_dyn { relop; value } =
+    Dyn.record [ "relop", Relop.to_dyn relop; "vaue", String_with_vars.to_dyn value ]
+  ;;
+
+  let encode { relop; value } =
+    Dune_sexp.List [ Relop.encode relop; String_with_vars.encode value ]
+  ;;
+
+  let decode =
+    let open Dune_sexp.Decoder in
+    enter
+      (let+ relop = Relop.decode
+       and+ value = String_with_vars.decode in
+       { relop; value })
+  ;;
+
+  let equal { relop; value } t =
+    Relop.equal relop t.relop && String_with_vars.equal value t.value
+  ;;
+end
+
+module Blang = struct
+  type t = (Version_spec.t, String_with_vars.t) Blang.Ast.t
+
+  let to_dyn = Blang.Ast.to_dyn Version_spec.to_dyn String_with_vars.to_dyn
+  let encode = Blang.Ast.encode Version_spec.encode String_with_vars.encode
+  let decode = Blang.Ast.decode Version_spec.decode String_with_vars.decode
+  let equal = Blang.Ast.equal Version_spec.equal String_with_vars.equal
+end
+
 module Dependency = struct
   type t =
     { package_name : Package_name.t

@@ -43,6 +43,12 @@ let to_string x =
 
 let encode x = to_string x |> Dune_sexp.Encoder.string
 
+let decode =
+  let map_ = map in
+  let open Dune_sexp.Decoder in
+  List.map map_ ~f:(fun (sym, op) -> sym, return op) |> sum
+;;
+
 let eval t (x : Ordering.t) =
   match t, x with
   | (Eq | Gte | Lte), Eq | (Neq | Lt | Lte), Lt | (Neq | Gt | Gte), Gt -> true

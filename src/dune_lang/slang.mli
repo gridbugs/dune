@@ -9,7 +9,7 @@ type t =
       unquoted pform to expand to a list of multiple strings. *)
   | Form of (Loc.t * form)
 
-and blang = t Blang.Ast.t
+and blang = (t, t) Blang.Ast.t
 
 and form =
   | Concat of t list (** Concatenate a list of strings recursively with no delimiter *)

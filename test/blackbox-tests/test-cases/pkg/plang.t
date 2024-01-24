@@ -2,9 +2,10 @@
   > (lang dune 3.13)
   > (package
   >  (name x)
+  >  (allow_empty)
   >  (depends_plang
   >   foo
-  >   (bar (>= %{os} linux))
+  >   (bar (and (>= 1.5) (= %{os} linux)))
   >   (any baz qux)))
   > EOF
 

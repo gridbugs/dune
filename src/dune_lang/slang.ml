@@ -6,7 +6,7 @@ type t =
   | Literal of String_with_vars.t
   | Form of (Loc.t * form)
 
-and blang = t Blang.Ast.t
+and blang = (t, t) Blang.Ast.t
 
 and form =
   | Concat of t list
@@ -34,7 +34,7 @@ let decode_literal =
 let decode =
   let open Decoder in
   fix (fun decode ->
-    let decode_blang = Blang.Ast.decode ~override_decode_bare_literal:None decode in
+    let decode_blang = Blang.Ast.decode decode decode in
     let decode_form =
       sum
         ~force_parens:true
@@ -77,14 +77,11 @@ let decode =
        decoder will attempt to invoke the other leading to infinite
        recursion. to prevent this, only attempt to parse [literal _] values
        when the blang parser parses literals.*)
-    let+ loc, x =
-      located
-        (Blang.Ast.decode ~override_decode_bare_literal:(Some decode_literal) decode)
-    in
+    let+ loc, x = located (Blang.Ast.decode decode_literal decode) in
     Form (loc, Blang x))
 ;;
 
-let decode_blang = Blang.Ast.decode ~override_decode_bare_literal:None decode
+let decode_blang = Blang.Ast.decode decode decode
 
 let rec encode t =
   let open Encoder in
@@ -101,23 +98,29 @@ let rec encode t =
     (match form with
      | Concat ts -> List (string "concat" :: List.map ts ~f:encode)
      | When (condition, t) ->
-       List [ string "when"; Blang.Ast.encode encode condition; encode t ]
+       List [ string "when"; Blang.Ast.encode encode encode condition; encode t ]
      | If { condition; then_; else_ } ->
-       List [ string "if"; Blang.Ast.encode encode condition; encode then_; encode else_ ]
+       List
+         [ string "if"
+         ; Blang.Ast.encode encode encode condition
+         ; encode then_
+         ; encode else_
+         ]
      | Has_undefined_var t -> List [ string "has_undefined_var"; encode t ]
      | Catch_undefined_var { value; fallback } ->
        List [ string "catch_undefined_var"; encode value; encode fallback ]
      | And_absorb_undefined_var blangs ->
        List
          (string "and_absorb_undefined_var"
-          :: List.map blangs ~f:(Blang.Ast.encode encode))
+          :: List.map blangs ~f:(Blang.Ast.encode encode encode))
      | Or_absorb_undefined_var blangs ->
        List
-         (string "or_absorb_undefined_var" :: List.map blangs ~f:(Blang.Ast.encode encode))
-     | Blang b -> Blang.Ast.encode encode b)
+         (string "or_absorb_undefined_var"
+          :: List.map blangs ~f:(Blang.Ast.encode encode encode))
+     | Blang b -> Blang.Ast.encode encode encode b)
 ;;
 
-let encode_blang = Blang.Ast.encode encode
+let encode_blang = Blang.Ast.encode encode encode
 
 let rec to_dyn = function
   | Nil -> Dyn.variant "Nil" []
@@ -126,21 +129,23 @@ let rec to_dyn = function
     (match form with
      | Concat ts -> Dyn.variant "Concat" (List.map ts ~f:to_dyn)
      | When (condition, t) ->
-       Dyn.variant "When" [ Blang.Ast.to_dyn to_dyn condition; to_dyn t ]
+       Dyn.variant "When" [ Blang.Ast.to_dyn to_dyn to_dyn condition; to_dyn t ]
      | If { condition; then_; else_ } ->
-       Dyn.variant "If" [ Blang.Ast.to_dyn to_dyn condition; to_dyn then_; to_dyn else_ ]
+       Dyn.variant
+         "If"
+         [ Blang.Ast.to_dyn to_dyn to_dyn condition; to_dyn then_; to_dyn else_ ]
      | Has_undefined_var t -> Dyn.variant "Has_undefined_var" [ to_dyn t ]
      | Catch_undefined_var { value; fallback } ->
        Dyn.variant "Catch_undefined_var" [ to_dyn value; to_dyn fallback ]
      | And_absorb_undefined_var blangs ->
        Dyn.variant
          "And_absorb_undefined_var"
-         (List.map blangs ~f:(Blang.Ast.to_dyn to_dyn))
+         (List.map blangs ~f:(Blang.Ast.to_dyn to_dyn to_dyn))
      | Or_absorb_undefined_var blangs ->
        Dyn.variant
          "Or_absorb_undefined_var"
-         (List.map blangs ~f:(Blang.Ast.to_dyn to_dyn))
-     | Blang b -> Dyn.variant "Blang" [ Blang.Ast.to_dyn to_dyn b ])
+         (List.map blangs ~f:(Blang.Ast.to_dyn to_dyn to_dyn))
+     | Blang b -> Dyn.variant "Blang" [ Blang.Ast.to_dyn to_dyn to_dyn b ])
 ;;
 
 let loc = function
