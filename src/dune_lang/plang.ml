@@ -1,5 +1,17 @@
 open! Stdune
 
+(* Decode a [String_with_vars.t] using variables from the lockfile language.
+   This is necessary so that opam variables like "os" and "arch" may be used
+   here. *)
+let decode_string_with_pkg_vars =
+  String_with_vars.decode_manually (fun _env pform ->
+    let env =
+      Pform.Env.pkg (Dune_sexp.Syntax.greatest_supported_version_exn Pkg.syntax)
+    in
+    print_endline (Dune_sexp.Template.Pform.to_dyn pform |> Dyn.to_string);
+    Pform.Env.parse env pform)
+;;
+
 module Version_spec = struct
   type t =
     { relop : Relop.t
@@ -18,7 +30,7 @@ module Version_spec = struct
     let open Dune_sexp.Decoder in
     enter
       (let+ relop = Relop.decode
-       and+ value = String_with_vars.decode in
+       and+ value = decode_string_with_pkg_vars in
        { relop; value })
   ;;
 
@@ -32,7 +44,7 @@ module Blang = struct
 
   let to_dyn = Blang.Ast.to_dyn Version_spec.to_dyn String_with_vars.to_dyn
   let encode = Blang.Ast.encode Version_spec.encode String_with_vars.encode
-  let decode = Blang.Ast.decode Version_spec.decode String_with_vars.decode
+  let decode = Blang.Ast.decode Version_spec.decode decode_string_with_pkg_vars
   let equal = Blang.Ast.equal Version_spec.equal String_with_vars.equal
 end
 
@@ -51,12 +63,16 @@ module Dependency = struct
 
   let decode =
     let open Dune_sexp.Decoder in
-    (let+ package_name = Package_name.decode in
-     { package_name; constraint_ = None })
-    <|> enter
-          (let+ package_name = Package_name.decode
-           and+ constraint_ = Blang.decode in
-           { package_name; constraint_ = Some constraint_ })
+    let+ x =
+      (let+ package_name = Package_name.decode in
+       { package_name; constraint_ = None })
+      <|> enter
+            (let+ package_name = Package_name.decode
+             and+ constraint_ = Blang.decode in
+             { package_name; constraint_ = Some constraint_ })
+    in
+    print_endline "bbb";
+    x
   ;;
 
   let encode { package_name; constraint_ } =
