@@ -8,7 +8,6 @@ let decode_string_with_pkg_vars =
     let env =
       Pform.Env.pkg (Dune_sexp.Syntax.greatest_supported_version_exn Pkg.syntax)
     in
-    print_endline (Dune_sexp.Template.Pform.to_dyn pform |> Dyn.to_string);
     Pform.Env.parse env pform)
 ;;
 
@@ -63,16 +62,12 @@ module Dependency = struct
 
   let decode =
     let open Dune_sexp.Decoder in
-    let+ x =
-      (let+ package_name = Package_name.decode in
-       { package_name; constraint_ = None })
-      <|> enter
-            (let+ package_name = Package_name.decode
-             and+ constraint_ = Blang.decode in
-             { package_name; constraint_ = Some constraint_ })
-    in
-    print_endline "bbb";
-    x
+    (let+ package_name = Package_name.decode in
+     { package_name; constraint_ = None })
+    <|> enter
+          (let+ package_name = Package_name.decode
+           and+ constraint_ = Blang.decode in
+           { package_name; constraint_ = Some constraint_ })
   ;;
 
   let encode { package_name; constraint_ } =
