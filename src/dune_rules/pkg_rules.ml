@@ -765,22 +765,23 @@ module Action_expander = struct
          User_error.raise
            ?loc
            [ Pp.text "\"run\" action must have at least one argument" ]
-       | (prog_loc, `Concat prog) :: args ->
+       | (prog_loc, Deferred_concat prog) :: args ->
          let+ exe =
            let prog =
              match prog with
-             | [ Path prog ] -> Value.Path prog
-             | [ Dir prog ] -> Value.Dir prog
+             | [ value ] -> value
              | prog ->
                String (List.map prog ~f:(Value.to_string ~dir) |> String.concat ~sep:"")
            in
            Expander.expand_exe_value expander prog ~loc:prog_loc
          in
          let args =
-           Array.Immutable.of_list_map args ~f:(fun (_, `Concat arg) ->
+           Array.Immutable.of_list_map args ~f:(fun (_loc, Deferred_concat arg) ->
              Array.Immutable.of_list_map arg ~f:(fun (arg : Value.t) ->
                match arg with
-               | String s -> Run_with_path.Spec.String s
+               | String s ->
+                 print_endline (sprintf "aaa %s" s);
+                 Run_with_path.Spec.String s
                | Path p | Dir p -> Path p))
          in
          Run_with_path.action exe args)

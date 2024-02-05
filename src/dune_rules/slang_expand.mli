@@ -1,6 +1,8 @@
 open! Stdune
 open Import
 
+type deferred_concat = Deferred_concat of Value.t list
+
 type expander =
   String_with_vars.t
   -> dir:Path.t
@@ -11,6 +13,6 @@ val eval_multi_located
   :  Slang.t list
   -> dir:Path.t
   -> f:expander
-  -> (Loc.t * [ `Concat of Value.t list ]) list Memo.t
+  -> (Loc.t * deferred_concat) list Memo.t
 
 val eval_blang : Slang.blang -> dir:Path.t -> f:expander -> bool Memo.t

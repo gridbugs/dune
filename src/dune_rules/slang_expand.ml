@@ -1,6 +1,8 @@
 open Import
 open Memo.O
 
+type deferred_concat = Deferred_concat of Value.t list
+
 type expander =
   String_with_vars.t
   -> dir:Path.t
@@ -12,25 +14,41 @@ type error =
       ; variable_name : Package_variable_name.t
       }
 
-let rec eval_rec (t : Slang.t) ~dir ~f : (Value.t list list, _) result Memo.t =
+(* Evaluate a single slang expression to an optional value. A result of [None]
+   indicates that the expression evaluated to Nil and will be treated
+   equivalently to the empty list. This code uses [_ option] rather than [_
+   list] to clarify the fact that no slang expression will produce a list whose
+   length exceeds 1. To preserve path semantics in expressions that would
+   concatenate strings with paths, concatenation of slangs produces a list of
+   values represented by the [deferred_concat] type. *)
+let rec eval_rec (t : Slang.t) ~dir ~f : (deferred_concat option, error) result Memo.t =
   match t with
-  | Nil -> Memo.return (Ok [])
+  | Nil -> Memo.return (Ok None)
   | Literal sw ->
-    f sw ~dir
-    >>| Result.map_error ~f:(function `Undefined_pkg_var variable_name ->
-      Undefined_pkg_var { literal = sw; variable_name })
-    >>| Result.map ~f:List.singleton
+    let+ x =
+      f sw ~dir
+      >>| Result.map_error ~f:(function `Undefined_pkg_var variable_name ->
+        Undefined_pkg_var { literal = sw; variable_name })
+      >>| Result.map ~f:(fun x -> Some (Deferred_concat x))
+    in
+    x
   | Form (_loc, form) ->
     (match form with
      | Concat xs ->
        Memo.List.map xs ~f:(eval_rec ~dir ~f)
        >>| Result.List.all
-       >>| Result.map ~f:(fun x -> List.concat x |> List.concat |> List.singleton)
+       >>| Result.map ~f:(fun xs_evaluated ->
+         let flattened =
+           List.concat_map xs_evaluated ~f:(function
+             | None -> []
+             | Some (Deferred_concat ys) -> ys)
+         in
+         Some (Deferred_concat flattened))
      | When (condition, t) ->
        let* condition = eval_blang_rec condition ~dir ~f in
        (match condition with
         | Error _ as e -> Memo.return e
-        | Ok false -> Memo.return (Ok [])
+        | Ok false -> Memo.return (Ok None)
         | Ok true -> eval_rec t ~dir ~f)
      | If { condition; then_; else_ } ->
        let* condition = eval_blang_rec condition ~dir ~f in
@@ -42,8 +60,8 @@ let rec eval_rec (t : Slang.t) ~dir ~f : (Value.t list list, _) result Memo.t =
        let+ result = eval_rec t ~dir ~f in
        Ok
          (match result with
-          | Ok _ -> [ [ Value.false_ ] ]
-          | Error (Undefined_pkg_var _) -> [ [ Value.true_ ] ])
+          | Ok _ -> Some (Deferred_concat [ Value.false_ ])
+          | Error (Undefined_pkg_var _) -> Some (Deferred_concat [ Value.true_ ]))
      | Catch_undefined_var { value; fallback } ->
        let* value = eval_rec value ~dir ~f in
        (match value with
@@ -59,9 +77,9 @@ let rec eval_rec (t : Slang.t) ~dir ~f : (Value.t list list, _) result Memo.t =
               (* Propagate the first error rather than the last *)
               if Result.is_ok acc then loop e xs else loop acc xs
             | Ok true -> loop acc xs
-            | Ok false -> Memo.return (Ok [ [ Value.false_ ] ]))
+            | Ok false -> Memo.return (Ok (Some (Deferred_concat [ Value.false_ ]))))
        in
-       loop (Ok [ [ Value.true_ ] ]) blangs
+       loop (Ok (Some (Deferred_concat [ Value.true_ ]))) blangs
      | Or_absorb_undefined_var blangs ->
        let rec loop acc = function
          | [] -> Memo.return acc
@@ -72,26 +90,26 @@ let rec eval_rec (t : Slang.t) ~dir ~f : (Value.t list list, _) result Memo.t =
               (* Propagate the first error rather than the last *)
               if Result.is_ok acc then loop e xs else loop acc xs
             | Ok false -> loop acc xs
-            | Ok true -> Memo.return (Ok [ [ Value.true_ ] ]))
+            | Ok true -> Memo.return (Ok (Some (Deferred_concat [ Value.true_ ]))))
        in
-       loop (Ok [ [ Value.false_ ] ]) blangs
+       loop (Ok (Some (Deferred_concat [ Value.false_ ]))) blangs
      | Blang b ->
        let+ result = eval_blang_rec b ~dir ~f in
        Result.map result ~f:(function
-         | true -> [ [ Value.true_ ] ]
-         | false -> [ [ Value.false_ ] ]))
+         | true -> Some (Deferred_concat [ Value.true_ ])
+         | false -> Some (Deferred_concat [ Value.false_ ])))
 
 and eval_to_bool (t : Slang.t) ~dir ~f =
   let+ result = eval_rec t ~dir ~f in
-  Result.map result ~f:(fun result ->
+  Result.map result ~f:(fun (result : deferred_concat option) ->
     let result =
-      List.map result ~f:(fun r ->
+      Option.map result ~f:(fun (Deferred_concat r) ->
         Value.String (List.map r ~f:(Value.to_string ~dir) |> String.concat ~sep:""))
     in
     match result with
-    | [ x ] when Value.(equal true_ x) -> true
-    | [ x ] when Value.(equal false_ x) -> false
-    | [ Value.String other ] ->
+    | Some x when Value.(equal true_ x) -> true
+    | Some x when Value.(equal false_ x) -> false
+    | Some (Value.String other) ->
       User_error.raise
         ~loc:(Slang.loc t)
         [ Pp.textf
@@ -99,7 +117,7 @@ and eval_to_bool (t : Slang.t) ~dir ~f =
              \"true\" or \"false\", however it evaluated to %S."
             other
         ]
-    | [ (Dir path | Path path) ] ->
+    | Some (Dir path | Path path) ->
       User_error.raise
         ~loc:(Slang.loc t)
         [ Pp.textf
@@ -108,22 +126,13 @@ and eval_to_bool (t : Slang.t) ~dir ~f =
              path: %s"
             (Path.to_string path)
         ]
-    | [] ->
+    | None ->
       User_error.raise
         ~loc:(Slang.loc t)
         [ Pp.text
             "This expression is used as a condition and so must evaluate to a single \
              string whose value is either \"true\" or \"false\", however it evaluated to \
              Nil (ie. zero strings)"
-        ]
-    | _ :: _ :: _ as multiple_values ->
-      User_error.raise
-        ~loc:(Slang.loc t)
-        [ Pp.textf
-            "This expression is used as a condition and so must evaluate to a single \
-             string whose value is either \"true\" or \"false\", however it evaluated to \
-             multiple strings: %s"
-            (List.map multiple_values ~f:(Value.to_string ~dir) |> String.enumerate_and)
         ])
 
 and eval_blang_rec (t : Slang.blang) ~dir ~f =
@@ -167,16 +176,21 @@ and eval_blang_rec (t : Slang.blang) ~dir ~f =
         (* Concatenation of strings is delayed but to compare the result of a
            slang expression we must force the concatenation first. *)
         let concat =
-          List.map ~f:(fun s ->
+          Option.map ~f:(fun (Deferred_concat s) ->
             Value.String (List.map s ~f:(Value.to_string ~dir) |> String.concat ~sep:""))
         in
-        Relop.eval op (Value.L.compare_vals ~dir (concat x) (concat y))))
+        Relop.eval
+          op
+          (Value.L.compare_vals
+             ~dir
+             (concat x |> Option.to_list)
+             (concat y |> Option.to_list))))
 ;;
 
-let eval t ~dir ~f : Value.t list list Memo.t =
+let eval t ~dir ~f : deferred_concat list Memo.t =
   eval_rec t ~dir ~f
   >>| function
-  | Ok value -> value
+  | Ok value -> Option.to_list value
   | Error (Undefined_pkg_var { literal; variable_name }) ->
     User_error.raise
       ~loc:(String_with_vars.loc literal)
@@ -188,7 +202,7 @@ let eval t ~dir ~f : Value.t list list Memo.t =
 
 let eval_multi_located ts ~dir ~f =
   Memo.List.concat_map ts ~f:(fun t ->
-    eval t ~dir ~f >>| List.map ~f:(fun value -> Slang.loc t, `Concat value))
+    eval t ~dir ~f >>| List.map ~f:(fun value -> Slang.loc t, value))
 ;;
 
 let eval_blang blang ~dir ~f =
