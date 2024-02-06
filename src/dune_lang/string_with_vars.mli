@@ -6,6 +6,8 @@
 open Stdune
 open Dune_sexp
 
+type deferred_concat = Deferred_concat of Value.t list
+
 (** A sequence of text and variables. *)
 type t
 

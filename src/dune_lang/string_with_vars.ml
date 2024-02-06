@@ -1,6 +1,8 @@
 open Stdune
 open Dune_sexp
 
+type deferred_concat = Deferred_concat of Value.t list
+
 type part =
   | Text of string
   | Pform of Template.Pform.t * Pform.t
@@ -265,6 +267,39 @@ end
 
 module Make_expander (A : Applicative) : Expander with type 'a app := 'a A.t = struct
   open A.O
+
+  let expand_result_deferred_concat
+    : type a.
+      t
+      -> mode:a Mode.t
+      -> f:(Value.t list, 'error) result A.t expander
+      -> (a list, 'error) result A.t
+    =
+    fun t ~mode ~f ->
+    match t.parts with
+    (* Optimizations for some common cases *)
+    | [] -> A.return (Ok [ Mode.string mode "" ])
+    | [ Text s ] -> A.return (Ok [ Mode.string mode s ])
+    | [ Pform (source, p) ] when not t.quoted ->
+      let+ v = f ~source p in
+      Result.map v ~f:(fun v -> [ Mode.value mode ~source v ])
+    | _ ->
+      let+ chunks =
+        A.all
+          (List.map t.parts ~f:(function
+            | Text s -> A.return (Ok [ `Concat [ Value.String s ] ])
+            | Error (_, msg) ->
+              (* The [let+ () = A.return () in ...] is to delay the error until
+                 the evaluation of the applicative *)
+              let+ () = A.return () in
+              raise (User_error.E msg)
+            | Pform (source, p) ->
+              let+ v = f ~source p in
+              Result.map v ~f:(fun v ->
+                if t.quoted then [ `Concat v ] else List.map v ~f:(fun x -> `Concat [ x ]))))
+      in
+      failwith ""
+  ;;
 
   let expand_result
     : type a.

@@ -1,7 +1,8 @@
 open Import
 open Memo.O
 
-type deferred_concat = Deferred_concat of Value.t list
+type deferred_concat = String_with_vars.deferred_concat =
+  | Deferred_concat of Value.t list
 
 type expander =
   String_with_vars.t
@@ -25,13 +26,10 @@ let rec eval_rec (t : Slang.t) ~dir ~f : (deferred_concat option, error) result 
   match t with
   | Nil -> Memo.return (Ok None)
   | Literal sw ->
-    let+ x =
-      f sw ~dir
-      >>| Result.map_error ~f:(function `Undefined_pkg_var variable_name ->
-        Undefined_pkg_var { literal = sw; variable_name })
-      >>| Result.map ~f:(fun x -> Some (Deferred_concat x))
-    in
-    x
+    f sw ~dir
+    >>| Result.map_error ~f:(function `Undefined_pkg_var variable_name ->
+      Undefined_pkg_var { literal = sw; variable_name })
+    >>| Result.map ~f:(fun x -> Some (String_with_vars.Deferred_concat x))
   | Form (_loc, form) ->
     (match form with
      | Concat xs ->

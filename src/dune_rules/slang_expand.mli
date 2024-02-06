@@ -1,7 +1,8 @@
 open! Stdune
 open Import
 
-type deferred_concat = Deferred_concat of Value.t list
+type deferred_concat = String_with_vars.deferred_concat =
+  | Deferred_concat of Value.t list
 
 type expander =
   String_with_vars.t

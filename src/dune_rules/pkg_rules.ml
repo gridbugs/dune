@@ -735,7 +735,11 @@ module Action_expander = struct
         slangs
         ~dir:(Path.build t.paths.source_dir)
         ~f:(fun sw ~dir ->
-          String_expander.Memo.expand_result sw ~mode:Many ~f:(expand_pform t) ~dir)
+          print_endline (sprintf "bbb %s" (String_with_vars.to_dyn sw |> Dyn.to_string));
+          let x =
+            String_expander.Memo.expand_result sw ~mode:Many ~f:(expand_pform t) ~dir
+          in
+          x)
     ;;
   end
 
