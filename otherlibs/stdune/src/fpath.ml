@@ -19,6 +19,11 @@ type mkdir_p_result =
   | Already_exists
   | Created
 
+let mkdir_p_result_to_dyn = function
+  | Already_exists -> Dyn.variant "Already_exists" []
+  | Created -> Dyn.variant "Created" []
+;;
+
 let rec mkdir_p ?perms t_s =
   match mkdir ?perms t_s with
   | Created -> Created
@@ -33,7 +38,7 @@ let rec mkdir_p ?perms t_s =
     else (
       let parent = Filename.dirname t_s in
       match mkdir_p ?perms parent with
-      | Created | Already_exists ->
+      | (Created | Already_exists) as parent_mkdir_p_result ->
         (* The [Already_exists] case might happen if some other process managed
            to create the parent directory concurrently. *)
         (match mkdir t_s ?perms with
@@ -42,7 +47,12 @@ let rec mkdir_p ?perms t_s =
          | Missing_parent_directory ->
            (* But we just successfully created the parent directory. So it was
               likely deleted right now. Let's give up *)
-           Code_error.raise "failed to create parent directory" [ "t_s", Dyn.string t_s ]))
+           Code_error.raise
+             "failed to create parent directory"
+             [ "t_s", Dyn.string t_s
+             ; "parent", Dyn.string parent
+             ; "parent_mkdir_p_result", mkdir_p_result_to_dyn parent_mkdir_p_result
+             ]))
 ;;
 
 let resolve_link path =
