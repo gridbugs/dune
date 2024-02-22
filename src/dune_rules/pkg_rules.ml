@@ -246,7 +246,7 @@ module Pkg = struct
           |> Path.Local.Set.union acc
         in
         let+ dirs =
-          Memo.sequential_map dirs ~f:(fun dir ->
+          Memo.parallel_map dirs ~f:(fun dir ->
             let dir = Path.Local.relative path dir in
             loop root Path.Local.Set.empty dir)
         in
@@ -783,7 +783,7 @@ module Action_expander = struct
          in
          Run_with_path.action exe args)
     | Progn t ->
-      let+ args = Memo.sequential_map t ~f:(expand ~expander) in
+      let+ args = Memo.parallel_map t ~f:(expand ~expander) in
       Action.Progn args
     | System arg ->
       let+ arg =
@@ -873,6 +873,7 @@ module Action_expander = struct
     let empty = { binaries = Filename.Map.empty; dep_info = Package.Name.Map.empty }
 
     let of_closure closure =
+      (* AAA *)
       Memo.sequential_map closure ~f:(fun (pkg : Pkg.t) ->
         let cookie = (Pkg_installed.of_paths pkg.paths).cookie in
         Action_builder.evaluate_and_collect_facts cookie
@@ -999,6 +1000,7 @@ end = struct
     | Some { Lock_dir.Pkg.build_command; install_command; depends; info; exported_env } ->
       assert (Package.Name.equal name info.name);
       let* depends =
+        (* AAA *)
         Memo.sequential_map depends ~f:(fun name ->
           resolve db ctx name
           >>| function
@@ -1029,7 +1031,7 @@ end = struct
       in
       let+ exported_env =
         let* expander = Action_expander.expander ctx t in
-        Memo.sequential_map exported_env ~f:(Action_expander.exported_env expander)
+        Memo.parallel_map exported_env ~f:(Action_expander.exported_env expander)
       in
       t.exported_env <- exported_env;
       Some t
@@ -1333,7 +1335,7 @@ module Install_action = struct
                 Path.Map.to_list_map by_src ~f:(fun src entries ->
                   List.map entries ~f:(fun entry -> src, entry))
                 |> List.concat
-                |> Fiber.sequential_map ~f:(fun (src, entry) ->
+                |> Fiber.parallel_map ~f:(fun (src, entry) ->
                   Async.async (fun () ->
                     install_entry ~src ~install_file ~target_dir entry))
                 >>| List.filter_opt
@@ -1428,7 +1430,7 @@ let source_rules (pkg : Pkg.t) =
   in
   let copy_rules = copy_rules @ extra_copy_rules in
   let source_deps = Dep.Set.union source_deps (Dep.Set.of_files extra_source_deps) in
-  source_deps, Memo.sequential_iter copy_rules ~f:(fun (loc, copy) -> rule ~loc copy)
+  source_deps, Memo.parallel_iter copy_rules ~f:(fun (loc, copy) -> rule ~loc copy)
 ;;
 
 let build_rule context_name ~source_deps (pkg : Pkg.t) =
@@ -1594,6 +1596,7 @@ let ocaml_toolchain context =
 let all_packages context =
   let* db = DB.get context in
   Dune_lang.Package_name.Map.values db.all
+  (* AAA *)
   |> Memo.sequential_map ~f:(fun (package : Lock_dir.Pkg.t) ->
     let package = package.info.name in
     Resolve.resolve db context (Loc.none, package)
