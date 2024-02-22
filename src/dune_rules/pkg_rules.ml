@@ -1458,7 +1458,7 @@ let build_rule context_name ~source_deps (pkg : Pkg.t) =
                            [ Action.mkdir (Path.Build.parent_exn dst)
                            ; Action.copy src dst
                            ])
-                       |> Action.progn
+                       |> Action.concurrent
                        |> Action.Full.make
                        |> Action_builder.return))
             ]
