@@ -42,7 +42,8 @@ let mkdir_p ?perms full_t_s =
         | (Created | Already_exists) as parent_mkdir_p_result ->
           (* The [Already_exists] case might happen if some other process managed
              to create the parent directory concurrently. *)
-          (match mkdir t_s ?perms with
+          let x = mkdir t_s ?perms in
+          (match x with
            | Created -> Created
            | Already_exists -> Already_exists
            | Missing_parent_directory ->

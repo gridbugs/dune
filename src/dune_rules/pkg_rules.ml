@@ -1597,7 +1597,7 @@ let all_packages context =
   let* db = DB.get context in
   Dune_lang.Package_name.Map.values db.all
   (* AAA *)
-  |> Memo.sequential_map ~f:(fun (package : Lock_dir.Pkg.t) ->
+  |> Memo.parallel_map ~f:(fun (package : Lock_dir.Pkg.t) ->
     let package = package.info.name in
     Resolve.resolve db context (Loc.none, package)
     >>| function

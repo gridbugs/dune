@@ -105,7 +105,11 @@ let copy_recursively =
   loop
 ;;
 
-let create_dir t dir = Path.mkdir_p (Path.build (map_path t dir))
+let create_dir t dir =
+  print_endline
+    (sprintf "create_dir %s %s" (Path.Build.to_string t.dir) (Path.Build.to_string dir));
+  Path.mkdir_p (Path.build (map_path t dir))
+;;
 
 let create_dirs t ~dirs ~rule_dir =
   create_dir t rule_dir;
@@ -196,9 +200,13 @@ let create ~mode ~dune_stats ~rule_loc ~dirs ~deps ~rule_dir ~rule_digest =
   let t = { dir = sandbox_dir; snapshot = None } in
   let open Fiber.O in
   let+ () =
+    print_endline (sprintf "creating sandbox %s" (Path.Build.to_string sandbox_dir));
     maybe_async (fun () ->
+      print_endline (sprintf "AAAAAA %s" (Path.Build.to_string sandbox_dir));
       Path.rm_rf (Path.build sandbox_dir);
+      print_endline (sprintf "BBBBBB %s" (Path.Build.to_string sandbox_dir));
       create_dirs t ~dirs ~rule_dir;
+      print_endline (sprintf "CCCCCC %s" (Path.Build.to_string sandbox_dir));
       (* CR-someday amokhov: Note that this doesn't link dynamic dependencies, so
          targets produced dynamically will be unavailable. *)
       link_deps t ~mode ~deps)
