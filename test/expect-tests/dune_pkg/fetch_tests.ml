@@ -16,6 +16,8 @@ let wrong_checksum =
   OpamHash.compute_from_string "random content" |> Checksum.of_opam_hash
 ;;
 
+let filename = "tarball.tar.gz"
+
 let subdir destination =
   let ext = Path.External.of_filename_relative_to_initial_cwd destination in
   Path.external_ ext
@@ -154,7 +156,6 @@ let%expect_test "downloading, without any checksum" =
 ;;
 
 let%expect_test "downloading, tarball" =
-  let filename = "tarball.tar.gz" in
   let port, server = serve_once ~filename in
   let destination = "tarball" in
   run
@@ -184,7 +185,6 @@ let%expect_test "downloading, tarball" =
 let%expect_test "downloading, tarball with no checksum match" =
   (* This test ensures that the contents of the extracted tarball are in the
      correct location. *)
-  let filename = "tarball.tar.gz" in
   let port, server = serve_once ~filename in
   let target = subdir "tarball" in
   run (download ~reproducible:false ~unpack:true ~port ~filename ~target);

@@ -29,7 +29,7 @@
  (target tarball.tar.gz)
  (deps plaintext.md)
  (action
-  (run tar -czf %{target} %{deps})))
+  (run tar -czf %{target} -C .. dune_pkg/%{deps})))
 
 (alias
  (name pkg)

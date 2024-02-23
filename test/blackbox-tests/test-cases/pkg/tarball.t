@@ -32,5 +32,4 @@ Demonstrate that we should support tarballs with and without a root directory
   ./foo
   $ runtest tarball2.tar.gz
   .
-  ./_source
-  ./_source/foo
+  ./foo
