@@ -1,3 +1,85 @@
+# Package Management Hacks
+
+This branch demonstrates an MVP of dune's package management features. It's made
+up of several WIP patches to dune, and can build both the bonsai and ocaml.org
+projects using dune to download and build all dependencies. Some packages are
+patched as a temporary workaround.
+
+## Bonsai
+
+```bash
+$ git clone https://github.com/gridbugs/bonsai
+$ cd bonsai
+$ git checkout pkg-hacks
+
+# Make a switch so we can safely install a custom dune
+$ opam switch create . --no-install
+$ eval $(opam env)
+
+# Install a custom dune into our switch
+$ opam pin add dune git+https://github.com/gridbugs/dune#pkg-hacks
+
+# Install the following system packages with your package manager:
+# - pkg-config
+# - gmp
+# - libffi
+# - openssl
+# - zlib
+
+# Solve and build
+$ dune pkg lock
+$ dune build
+```
+
+## Ocaml.org
+
+```bash
+$ git clone https://github.com/gridbugs/ocaml.org
+$ cd ocaml.org
+$ git checkout pkg-hacks
+
+# Make a switch with a compatible version of the ocaml compiler (and so we can safely install a custom dune)
+$ opam switch create . 4.14.1 --no-install
+$ eval $(opam env)
+
+# Install a custom dune into our switch
+$ opam pin add dune git+https://github.com/gridbugs/dune#pkg-hacks
+
+# Install the following system packages with your package manager:
+# - pkg-config
+# - gmp
+# - libffi
+# - libev
+# - openssl
+# - zlib
+# - curl
+# - autoconf
+# - oniguruma
+
+# Solve and build
+$ dune pkg lock
+$ dune build
+```
+
+## Changes to low-level packages
+
+### Ocamlfind
+
+- [Relocatable ocamlfind](https://github.com/ocaml/ocamlfind/pull/72)
+- [Hack to fix topfind](https://github.com/gridbugs/ocamlfind/commit/e8c4bf091f6037c2de483a67e2b0a72dc9b9e4d8)
+
+### Ocamlbuild
+
+- [Remove examples](https://github.com/gridbugs/ocamlbuild/commit/8ae463835cbb934707f9f985e8a4532ab42bcea3)
+  - The examples involve directory symlinks and removing them is a workaround
+    for [Error with directory symlink: Unexpected file kind "S_DIR"](https://github.com/ocaml/dune/issues/9873)
+- [Hack to remove sandbox paths from build config](https://github.com/gridbugs/ocamlbuild/commit/39c27f04d7640b437ebe9a733c6ebc193d3233ed)
+
+### Topkg
+
+- [Remove topkg-care metadata from META](https://github.com/gridbugs/topkg/commit/19d6b9c1ea1ee5a9f59a7d46ec789a2d36ebca05)
+  - The inclusion of topkg-care seems to confuse dune
+
 ![Dune][logo]
 
 # A Composable Build System for OCaml
