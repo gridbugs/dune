@@ -456,11 +456,7 @@ module Run_with_path = struct
     type ('path, 'target) t =
       { prog : Action.Prog.t
       ; args : 'path arg Array.Immutable.t
-      ; set_ocamlfind_destdir : 'path option
-      (* If [set_ocamlfind_destdir] is [Some x] then the OCAMLFIND_DESTDIR
-         environment variable will be set to the path which is [x] transformed
-         to inside the current package's sandbox when the command is executed.
-      *)
+      ; ocamlfind_destdir : 'path
       }
 
     let name = "run-with-path"
@@ -475,13 +471,13 @@ module Run_with_path = struct
     let bimap t f _g =
       { t with
         args = Array.Immutable.map t.args ~f:(map_arg ~f)
-      ; set_ocamlfind_destdir = Option.map ~f t.set_ocamlfind_destdir
+      ; ocamlfind_destdir = f t.ocamlfind_destdir
       }
     ;;
 
     let is_useful_to ~memoize:_ = true
 
-    let encode { prog; args; set_ocamlfind_destdir = _ } path _ : Dune_lang.t =
+    let encode { prog; args; ocamlfind_destdir = _ } path _ : Dune_lang.t =
       let prog =
         Dune_lang.atom_or_quoted_string
         @@
@@ -500,7 +496,7 @@ module Run_with_path = struct
     ;;
 
     let action
-      { prog; args; set_ocamlfind_destdir }
+      { prog; args; ocamlfind_destdir }
       ~(ectx : Action.Ext.context)
       ~(eenv : Action.Ext.env)
       =
@@ -517,11 +513,10 @@ module Run_with_path = struct
         in
         let metadata = Process.create_metadata ~purpose:ectx.purpose () in
         let env =
-          match set_ocamlfind_destdir with
-          | None -> eenv.env
-          | Some value ->
-            let value = Path.to_absolute_filename value in
-            Env.add eenv.env ~var:"OCAMLFIND_DESTDIR" ~value
+          Env.add
+            eenv.env
+            ~var:"OCAMLFIND_DESTDIR"
+            ~value:(Path.to_absolute_filename ocamlfind_destdir)
         in
         Process.run
           (Accept eenv.exit_codes)
@@ -540,14 +535,14 @@ module Run_with_path = struct
     ;;
   end
 
-  let action prog args ~set_ocamlfind_destdir =
+  let action prog args ~ocamlfind_destdir =
     let module M = struct
       type path = Path.t
       type target = Path.Build.t
 
       module Spec = Spec
 
-      let v = { Spec.prog; args; set_ocamlfind_destdir }
+      let v = { Spec.prog; args; ocamlfind_destdir }
     end
     in
     Action.Extension (module M)
@@ -769,11 +764,7 @@ module Action_expander = struct
     ;;
   end
 
-  let rec expand
-    (action : Dune_lang.Action.t)
-    ~(expander : Expander.t)
-    ~set_ocamlfind_destdir
-    =
+  let rec expand (action : Dune_lang.Action.t) ~(expander : Expander.t) =
     let dir = Path.build expander.paths.source_dir in
     match action with
     | Run args ->
@@ -812,9 +803,12 @@ module Action_expander = struct
                | String s -> Run_with_path.Spec.String s
                | Path p | Dir p -> Path p))
          in
-         Run_with_path.action exe args ~set_ocamlfind_destdir)
+         let ocamlfind_destdir =
+           Path.relative (Path.build expander.paths.target_dir) (Section.to_string Lib)
+         in
+         Run_with_path.action exe args ~ocamlfind_destdir)
     | Progn t ->
-      let+ args = Memo.parallel_map t ~f:(expand ~expander ~set_ocamlfind_destdir) in
+      let+ args = Memo.parallel_map t ~f:(expand ~expander) in
       Action.Progn args
     | System arg ->
       let+ arg =
@@ -835,12 +829,11 @@ module Action_expander = struct
         >>| Expander0.as_in_build_dir ~what:"substitute" ~loc:(String_with_vars.loc dst)
       in
       Substitute.action expander ~src ~dst
-    | Withenv (updates, action) ->
-      expand_withenv expander updates action ~set_ocamlfind_destdir
+    | Withenv (updates, action) -> expand_withenv expander updates action
     | When (condition, action) ->
       Expander.eval_blang expander condition
       >>= (function
-       | true -> expand action ~expander ~set_ocamlfind_destdir
+       | true -> expand action ~expander
        | false -> Memo.return (Action.progn []))
     | Write_file (path_sw, perm, contents_sw) ->
       let+ path =
@@ -859,7 +852,7 @@ module Action_expander = struct
         "Pkg_rules.action_expander.expand: unsupported action"
         [ "action", Dune_lang.Action.to_dyn action ]
 
-  and expand_withenv (expander : Expander.t) ~set_ocamlfind_destdir updates action =
+  and expand_withenv (expander : Expander.t) updates action =
     let* env, updates =
       let dir = Path.build expander.paths.source_dir in
       Memo.List.fold_left
@@ -888,7 +881,7 @@ module Action_expander = struct
     in
     let+ action =
       let expander = { expander with env } in
-      expand action ~expander ~set_ocamlfind_destdir
+      expand action ~expander
     in
     List.fold_left updates ~init:action ~f:(fun action (k, v) ->
       Action.Setenv (k, v, action))
@@ -953,11 +946,10 @@ module Action_expander = struct
 
   let sandbox = Sandbox_mode.Set.singleton Sandbox_mode.copy
 
-  let expand context (pkg : Pkg.t) action ~set_ocamlfind_destdir =
+  let expand context (pkg : Pkg.t) action =
     let+ action =
       let* expander = expander context pkg in
-      expand action ~expander ~set_ocamlfind_destdir
-      >>| Action.chdir (Path.build pkg.paths.source_dir)
+      expand action ~expander >>| Action.chdir (Path.build pkg.paths.source_dir)
     in
     (* TODO copying is needed for build systems that aren't dune and those
        with an explicit install step *)
@@ -975,7 +967,7 @@ module Action_expander = struct
 
   let build_command context (pkg : Pkg.t) =
     Option.map pkg.build_command ~f:(function
-      | Action action -> expand context pkg action ~set_ocamlfind_destdir:None
+      | Action action -> expand context pkg action
       | Dune ->
         (* CR-rgrinberg: respect [dune subst] settings. *)
         Command.run_dyn_prog
@@ -986,13 +978,7 @@ module Action_expander = struct
   ;;
 
   let install_command context (pkg : Pkg.t) =
-    Option.map pkg.install_command ~f:(fun action ->
-      let* expander = expander context pkg in
-      let set_ocamlfind_destdir =
-        Some
-          (Path.relative (Path.build expander.paths.target_dir) (Section.to_string Lib))
-      in
-      expand context pkg action ~set_ocamlfind_destdir)
+    Option.map pkg.install_command ~f:(fun action -> expand context pkg action)
   ;;
 
   let exported_env (expander : Expander.t) (env : _ Env_update.t) =
