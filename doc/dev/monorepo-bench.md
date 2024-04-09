@@ -150,6 +150,7 @@ Each entry specifies a file to change, some text in the file to be replaced and
 two replacement text options -- something which compiles and something which
 does not compile during the watch mode benchmark.
 
+#### Make a new release of the monorepo benchmarks
 To have Dune start running the new benchmark in `current-bench`, do a new release
 of the
 [ocaml-monorepo-benchmark](https://github.com/ocaml-dune/ocaml-monorepo-benchmark)
@@ -162,3 +163,97 @@ file, setting the value of the `MONOREPO_BENCHMARK_TAG` variable to the tag
 you just pushed.
 
 Future PRs against Dune will now run the new benchmark.
+
+
+### Maintenance
+
+Whenever something goes wrong that prevents the benchmarks from running, update
+the [Postmortems File](https://github.com/ocaml-dune/ocaml-monorepo-benchmark/blob/main/postmortems.md)
+in the [OCaml Monorepo Benchmark](https://github.com/ocaml-dune/ocaml-monorepo-benchmark)
+repo detailing the problem and the fix. It's also worth reading through that
+file in case the current problem is similar to one that's already been solved
+(still update the file in this case though!).
+
+Here are some common problems that affect the monorepo benchmark.
+
+#### Dune gets a backwards-incompatible update
+
+Sometimes dune gets an update that changes its contract with projects (e.g.
+[dune/9472](https://github.com/ocaml/dune/pull/9472),
+[dune/8293](https://github.com/ocaml/dune/pull/8293)).
+Such changes are rare and usually affect a small number of packages, but the
+benchmark monorepo depends on a large number of packages and if a single one
+fails to build then the monorepo benchmark will not run.
+
+The fix is to patch any affected packages so that they can be built with dune
+following the breaking change. Add a file to the "benchmark/patches" directory
+of the [OCaml Monorepo Benchmark](https://github.com/ocaml-dune/ocaml-monorepo-benchmark).
+Patches must be named x.diff where x is the name of the subdirectory of the
+duniverse directory containing the affected package. The patch will be applied
+from the package's duniverse subdirectory before the benchmarks are run.
+
+Then [make a new release of the monorepo
+benchmark and updates dune's monorepo bench dockerfile](#make-a-new-release-of-the-monorepo-benchmarks)
+so that dune can see the new changes.
+
+Be sure to also upstream the patch to the affected package! (Note that even
+though the fix may be upstreamed, the monorepo benchmark still needs the patch
+file. This is because it uses a snapshot of the opam repo, so isn't exposed to
+package updates.)
+
+#### The source archive of a package is no longer available
+
+This is only an issue when generating the monorepo duniverse directory, as the
+source for all packages is cached on the benchmark server in a persistent
+duniverse directory.
+
+The source archives for opam packages are not stored in a centralized location;
+each package is free to choose an arbitrary url for opam to download the source archive
+from. This leads to some packages sources becoming unavailable over time due to
+sites hosting package sources becoming unavailable, repos on github being
+renamed, etc. Due to the number of packages in the monorepo, and the infrequency
+with which the duniverse directory is generated, the chance of at least one
+package being unavailable while generating the duniverse directory turns out to
+be quite high.
+
+Congratulations, you've just found a broken package that could potentially
+affect opam users in the wild.
+
+The fix will be to somehow find the source archive for the package and upload it
+to [Opam Source Archives](https://github.com/ocaml/opam-source-archives) repo.
+This repo stores the source archives of package whose original source archive
+has become unavailable.
+
+To find the package source archive, first check if it's in the opam cache. If
+it's there, it will be at the url
+`https://opam.ocaml.org/cache/<hash-algo>/<first-two-chars-of-hash>/<full-hash>`.
+For example:
+`https://opam.ocaml.org/cache/md5/04/04f0113150261bae2075381c18c6e60c`.
+The hash of a package is included in the output of `opam show <package>`.
+
+If it's not in the opam cache then it might still be in your local opam cache
+(assuming you've downloaded the package before). Assuming a standard opam
+installation on unix this will be located at
+`~/.opam/download-cache/<hash-algo>/<first-two-chars-of-hash>/<full-hash>`.
+If it's not on your machine, ask around to see if it's on someone else's.
+
+Note that to add the package to the Opam Source Archives you will need to name
+it according to the convention there. If you got the package source archive from
+a cache it will be named after its hash.
+
+Once the PR adding the source archive to the Opam Source Archives is merged,
+manually update the `monorepo-bench.opam.locked` file in the
+`benchmark` directory of the [OCaml Monorepo
+Benchmark](https://github.com/ocaml-dune/ocaml-monorepo-benchmark) to use the
+new url. Make sure to use the raw url for the file (see existing examples in
+that file).
+
+If no cached copy of the package is available then you'll need to get creative.
+Its git repo might be public and included in the output of `opam show <package>`.
+Worst case you'll need to remove the package from the benchmark monorepo by
+removing its entries from the `monorepo-bench.opam`,
+`monorepo-bench.opam.locked`, and `dune-project` files in the `benchmark`
+directory of the [OCaml Monorepo
+Benchmark](https://github.com/ocaml-dune/ocaml-monorepo-benchmark) repo (note
+that the `dune-project` file lists libraries - not packages). The package's
+reverse dependencies will also need to be removed in this way.
