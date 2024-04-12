@@ -287,7 +287,17 @@ module Pkg = struct
         List.fold_left t.exported_env ~init:env ~f:Env_update.set)
   ;;
 
-  let build_env t = build_env_of_deps @@ deps_closure t
+  let prepend_path path env_map =
+    let value = Value.Dir path in
+    Env_path.update_map env_map ~f:(function
+      | None -> Some [ value ]
+      | Some current -> Some (value :: current))
+  ;;
+
+  let build_env t =
+    build_env_of_deps @@ deps_closure t
+    |> prepend_path (Path.of_string "/home/s/.cache/dune/pkg/compiler/5.2.0/bin")
+  ;;
 
   let exported_env t =
     let base =
@@ -733,7 +743,10 @@ module Action_expander = struct
              (match Filename.Map.find t.artifacts program with
               | Some s -> Memo.return @@ Ok s
               | None ->
-                (let path = Global.env () |> Env_path.path in
+                (let path =
+                   Path.of_string "/home/s/.cache/dune/pkg/compiler/5.2.0/bin"
+                   :: (Global.env () |> Env_path.path)
+                 in
                  Which.which ~path program)
                 >>| (function
                  | Some p -> Ok p

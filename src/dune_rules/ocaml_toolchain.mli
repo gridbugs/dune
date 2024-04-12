@@ -17,6 +17,8 @@ type t =
   ; lib_config : Lib_config.t
   }
 
+val in_compiler_dir : Context_name.t -> Env.t -> t Memo.t
+
 val of_env_with_findlib
   :  Context_name.t
   -> Env.t

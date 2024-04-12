@@ -109,39 +109,55 @@ let make name ~which ~env ~get_ocaml_tool =
     }
 ;;
 
-let of_env_with_findlib name env findlib_config ~which =
-  let get_tool_using_findlib_config prog =
-    Memo.Option.bind findlib_config ~f:(Findlib_config.tool ~prog)
+let in_compiler_dir name env =
+  let compiler_bin_dir =
+    (* TODO infer this from the environment. This function should probably take
+       a version number to choose the correct compiler version. Possibly also
+       this function should download and build the correct compiler if it's not
+       found at the expected path. *)
+    Path.Outside_build_dir.of_string "/home/s/.cache/dune/pkg/compiler/5.2.0/bin"
   in
-  let which program =
-    get_tool_using_findlib_config program
-    >>= function
-    | Some x -> Memo.return (Some x)
-    | None -> which program
-  in
-  let get_ocaml_tool ~dir prog =
-    get_tool_using_findlib_config prog
-    >>= function
-    | Some x -> Memo.return (Some x)
-    | None -> Which.best_in_dir ~dir prog
-  in
-  make name ~env ~get_ocaml_tool ~which
-;;
-
-let of_binaries ~path name env binaries =
-  let which =
-    let map =
-      Path.Set.to_list binaries
-      |> Filename.Map.of_list_map_exn ~f:(fun binary -> Path.basename binary, binary)
-    in
-    fun basename ->
-      match Which.candidates basename |> List.find_map ~f:(Filename.Map.find map) with
-      | Some s -> Memo.return (Some s)
-      | None -> Which.which ~path basename
+  let which prog =
+    let path = Path.Outside_build_dir.relative compiler_bin_dir prog in
+    let+ exists = Fs_memo.file_exists path in
+    if exists then Some (Path.outside_build_dir path) else None
   in
   let get_ocaml_tool ~dir:_ prog = which prog in
-  make name ~env ~get_ocaml_tool ~which
+  make name ~which ~env ~get_ocaml_tool
 ;;
+
+let of_env_with_findlib name env findlib_config ~which = in_compiler_dir name env
+(*
+   let get_tool_using_findlib_config prog =
+   Memo.Option.bind findlib_config ~f:(Findlib_config.tool ~prog)
+   in
+   let which program =
+   get_tool_using_findlib_config program
+   >>= function
+   | Some x -> Memo.return (Some x)
+   | None -> which program
+   in
+   let get_ocaml_tool ~dir prog =
+   get_tool_using_findlib_config prog
+   >>= function
+   | Some x -> Memo.return (Some x)
+   | None -> Which.best_in_dir ~dir prog
+   in
+   make name ~env ~get_ocaml_tool ~which*)
+
+let of_binaries ~path name env binaries = in_compiler_dir name env
+(*let which =
+  let map =
+  Path.Set.to_list binaries
+  |> Filename.Map.of_list_map_exn ~f:(fun binary -> Path.basename binary, binary)
+  in
+  fun basename ->
+  match Which.candidates basename |> List.find_map ~f:(Filename.Map.find map) with
+  | Some s -> Memo.return (Some s)
+  | None -> Which.which ~path basename
+  in
+  let get_ocaml_tool ~dir:_ prog = which prog in
+  make name ~env ~get_ocaml_tool ~which*)
 
 (* Seems wrong to support this at the level of the engine. This is easily
    implemented at the level of the rules and is noly needed for windows *)
