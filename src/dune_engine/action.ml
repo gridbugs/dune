@@ -367,11 +367,11 @@ module Full = struct
   let map t ~f = { t with action = f t.action }
 
   let add_env e t =
-    print_endline
+    (*print_endline
       (sprintf
          "add_env %s %s"
          (Env.to_dyn t.env |> Dyn.to_string)
-         (Env.to_dyn e |> Dyn.to_string));
+         (Env.to_dyn e |> Dyn.to_string)); *)
     { t with env = Env.extend_env t.env e }
   ;;
 

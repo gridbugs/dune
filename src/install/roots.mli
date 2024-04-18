@@ -22,7 +22,12 @@ val map : f:('a -> 'b) -> 'a t -> 'b t
 (** return the roots of the first argument if present *)
 val first_has_priority : 'a option t -> 'a option t -> 'a option t
 
+(** Returns a an association list representing environment variables
+    and their values implied by a given set of roots, excluding the
+    PATH variable. PATH is excluded as its value is not a single path
+    but a list of paths. *)
 val to_env_without_path : Path.Build.t t -> (Env.Var.t * Path.Build.t) list
+
 val add_to_env : Path.Build.t t -> Env.t -> Env.t
 val make : 'a -> relative:('a -> string -> 'a) -> 'a t
 val make_all : 'a -> 'a t

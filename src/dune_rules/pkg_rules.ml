@@ -270,24 +270,43 @@ module Pkg = struct
     |> List.fold_left ~init:Dep.Set.empty ~f:(fun acc t -> dep t |> Dep.Set.add acc)
   ;;
 
-  let build_env_of_deps =
-    let add_to_path env var what =
-      Env.Map.update env var ~f:(fun paths ->
+  (* Returns a map of environment variables that are associated with
+     lists of paths that tell ocaml build tools how to find the files
+     installed by this package. *)
+  let build_env_path_vars t =
+    (* Adds a path to an env where variables are associated with lists
+       of paths. The path is prepended to the list associated with the
+       given variable and a new binding is added to the env if the
+       variable is not yet part of the env. *)
+    let add_path_to_env_map env_map var path =
+      Env.Map.update env_map var ~f:(fun paths ->
         let paths = Option.value paths ~default:[] in
-        Some (Value.Dir (Path.build what) :: paths))
+        Some (Value.Dir (Path.build path) :: paths))
     in
-    fun xs ->
-      List.fold_left xs ~init:Env.Map.empty ~f:(fun env t ->
-        let env =
-          let roots = Paths.install_roots t.paths in
-          let init = add_to_path env Env_path.var roots.bin in
-          let vars = Install.Roots.to_env_without_path roots in
-          List.fold_left vars ~init ~f:(fun acc (var, path) -> add_to_path acc var path)
-        in
-        List.fold_left t.exported_env ~init:env ~f:Env_update.set)
+    let env =
+      let roots = Paths.install_roots t.paths in
+      let init = add_path_to_env_map Env.Map.empty Env_path.var roots.bin in
+      let vars = Install.Roots.to_env_without_path roots in
+      List.fold_left vars ~init ~f:(fun acc (var, path) ->
+        add_path_to_env_map acc var path)
+    in
+    List.fold_left t.exported_env ~init:env ~f:Env_update.set
   ;;
 
-  let build_env t = build_env_of_deps @@ deps_closure t
+  (* Given a list of packages, compute the union of the build envs of
+     each package, concatenating the lists of paths associated with each
+     environment variable. *)
+  let build_env_union ts =
+    List.map ts ~f:build_env_path_vars
+    |> Env.Map.union_all ~f:(fun _var paths1 paths2 -> Some (paths1 @ paths2))
+  ;;
+
+  (* [build_env t] returns the env implied by all dependencies of this
+     package, but not this package. Each variable in the env is bound to
+     a list of paths. These variables tell ocaml build tools where to
+     find files that were installed as part of each dependency of the
+     package [t] in the faux opam switch inside the build directory. *)
+  let build_env t = build_env_union @@ deps_closure t
 
   let exported_env t =
     let base =
@@ -1460,7 +1479,7 @@ let source_rules (pkg : Pkg.t) =
 ;;
 
 let build_rule context_name ~source_deps (pkg : Pkg.t) =
-  let+ build_action =
+  let+ build_and_install_action =
     let+ build_and_install =
       let+ copy_action =
         let+ copy_action =
@@ -1532,10 +1551,14 @@ let build_rule context_name ~source_deps (pkg : Pkg.t) =
   let open Action_builder.With_targets.O in
   Action_builder.deps deps
   |> Action_builder.with_no_targets
-  (* TODO should we add env deps on these? *)
   >>>
-  let build_action = add_env (Pkg.exported_env pkg) build_action in
-  Action_builder.With_targets.add_directories ~directory_targets:[ pkg.paths.target_dir ] build_action
+  (* TODO should we add env deps on these? *)
+  let build_and_install_action_with_env =
+    add_env (Pkg.exported_env pkg) build_and_install_action
+  in
+  Action_builder.With_targets.add_directories
+    ~directory_targets:[ pkg.paths.target_dir ]
+    build_and_install_action
 ;;
 
 let gen_rules context_name (pkg : Pkg.t) =
@@ -1647,7 +1670,7 @@ let which context =
 
 let ocamlpath context =
   let+ all_packages = all_packages context in
-  let env = Pkg.build_env_of_deps all_packages in
+  let env = Pkg.build_env_union all_packages in
   Env.Map.find env Dune_findlib.Config.ocamlpath_var
   |> Option.value ~default:[]
   |> List.map ~f:(function
@@ -1660,7 +1683,7 @@ let lock_dir_path = Lock_dir.get_path
 
 let exported_env context =
   let+ all_packages = all_packages context in
-  let env = Pkg.build_env_of_deps all_packages in
+  let env = Pkg.build_env_union all_packages in
   let vars = Env.Map.map env ~f:Env_update.string_of_env_values in
   Env.extend Env.empty ~vars
 ;;
