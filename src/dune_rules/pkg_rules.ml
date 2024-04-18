@@ -1535,7 +1535,7 @@ let build_rule context_name ~source_deps (pkg : Pkg.t) =
   (* TODO should we add env deps on these? *)
   >>>
   let build_action = add_env (Pkg.exported_env pkg) build_action in
-  Action_builder.With_targets.add_directories ~directory_targets:[ pkg.paths.target_dir ]
+  Action_builder.With_targets.add_directories ~directory_targets:[ pkg.paths.target_dir ] build_action
 ;;
 
 let gen_rules context_name (pkg : Pkg.t) =
