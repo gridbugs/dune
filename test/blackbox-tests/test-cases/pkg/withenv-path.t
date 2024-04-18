@@ -79,9 +79,12 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 Printing out PATH without setting it when the package has a dependency:
   $ cat >dune.lock/test.pkg <<'EOF'
   > (version 0.0.1)
-  > (depends hello1)
+  > (depends hello1 hello2)
   > (build
-  >  (system "echo PATH=$PATH"))
+  >  (withenv (
+  >    (+= PATH foo)
+  >    (+= PATH bar))
+  >  (system "echo PATH=$PATH")))
   > EOF
   $ dune clean
   $ OCAMLRUNPARAM=b PATH=$DUNE_PATH:/bin build_pkg test 2>&1 | sed -e "s#$DUNE_PATH#DUNE_PATH#"

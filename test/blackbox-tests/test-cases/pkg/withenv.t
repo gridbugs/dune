@@ -13,8 +13,10 @@ Setting environment variables in actions
   >    (= BAR xxx)
   >    (+= BAR yyy)
   >    (:= BAR "")
-  >    (+= BAR ""))
-  >   (system "echo XYZ=$XYZ; echo FOO=$FOO; echo BAR=$BAR")))
+  >    (+= BAR "")
+  >    (=: BAZ "aaa")
+  >    )
+  >   (system "echo XYZ=$XYZ; echo FOO=$FOO; echo BAR=$BAR; echo BAZ=$BAZ")))
   > EOF
   $ build_pkg test
   XYZ=111:000

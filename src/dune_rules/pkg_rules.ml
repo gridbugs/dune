@@ -147,9 +147,25 @@ end
 module Env_update = struct
   include Dune_lang.Action.Env_update
 
+  (** Handle the :=, +=, =:, and =+ opam environment update
+      operators. The operators with colon character update a variable,
+      adding a leading/trailing separator (e.g. the ':' chars in PATH
+      on unix) if the variable was initially unset (NB. the opam
+      manual says unset or empty, but experimentally one can verify
+      that using a plus operator to update a variable containing an
+      empty string indeed results in a leading/trailing
+      seperator). The operators with a plus character update a
+      variable without adding a leading/trailing separator. The
+      operators with the equal sign at the end prepend the new value,
+      and the operators with the equal sign at the start append the
+      new value.
+
+      Further, updates where the newly added value is the empty string
+      are ignored since opam refuses to add empty strings to list
+      variables.*)
   let update kind ~new_v ~old_v ~f =
     if new_v = ""
-    then old_v
+    then (* refuse to add empty strings to lists *) old_v
     else (
       match kind with
       | `Colon ->
@@ -182,6 +198,8 @@ module Env_update = struct
         assert false)
   ;;
 
+  (* Concatenate a list of values in the style of lists found in
+     environment variables, such as PATH *)
   let string_of_env_values values =
     List.map values ~f:(function
       | Value.String s -> s
@@ -270,9 +288,10 @@ module Pkg = struct
     |> List.fold_left ~init:Dep.Set.empty ~f:(fun acc t -> dep t |> Dep.Set.add acc)
   ;;
 
-  (* Returns a map of environment variables that are associated with
-     lists of paths that tell ocaml build tools how to find the files
-     installed by this package. *)
+  (** Returns a map of environment variables that are associated with
+      lists of paths that tell ocaml build tools how to find the files
+      installed by this package. Files will be installed into a faux
+      opam switch inside the build directory. *)
   let build_env_path_vars t =
     (* Adds a path to an env where variables are associated with lists
        of paths. The path is prepended to the list associated with the
@@ -293,37 +312,54 @@ module Pkg = struct
     List.fold_left t.exported_env ~init:env ~f:Env_update.set
   ;;
 
-  (* Given a list of packages, compute the union of the build envs of
-     each package, concatenating the lists of paths associated with each
-     environment variable. *)
-  let build_env_union ts =
+  (** Given a list of packages, compute the union of the build env path
+      variables of each package, concatenating the lists of paths
+      associated with each environment variable. The order of paths in
+      each variable will be the same as the order of the associated
+      packages in the list passed to this function. *)
+  let build_env_path_vars_union ts =
     List.map ts ~f:build_env_path_vars
     |> Env.Map.union_all ~f:(fun _var paths1 paths2 -> Some (paths1 @ paths2))
   ;;
 
-  (* [build_env t] returns the env implied by all dependencies of this
-     package, but not this package. Each variable in the env is bound to
-     a list of paths. These variables tell ocaml build tools where to
-     find files that were installed as part of each dependency of the
-     package [t] in the faux opam switch inside the build directory. *)
-  let build_env t = build_env_union @@ deps_closure t
+  (** [build_env_path_vars_of_deps t] returns an env map associating
+      environment variables with list of paths which tell ocaml build
+      tools how to find the files installed by packages in the transitive
+      dependency closure of the package [t] (excluding [t] itself). For
+      example library files of dependencies that are required to link
+      the binary artifacts of [t], or build tools from other packages
+      that must be executad in order to build [t]. *)
+  let build_env_path_vars_of_deps t = build_env_path_vars_union @@ deps_closure t
 
+  (** [base_build_env t] returns an env map associating environment
+      variables with values expected by ocaml build tools when bulding
+      [t]. *)
+  let base_build_env t =
+    Env.Map.of_list_exn
+      [ Opam_switch.opam_switch_prefix_var_name, Path.Build.to_string t.paths.target_dir
+      ; "CDPATH", ""
+      ; "MAKELEVEL", ""
+      ; "OPAM_PACKAGE_NAME", Package.Name.to_string t.info.name
+      ; "OPAM_PACKAGE_VERSION", Package_version.to_string t.info.version
+      ; "OPAMCLI", "2.0"
+      ]
+  ;;
+
+  (** [exported_env] returns the complete environment that will be used
+      when building and installing [t]. In addition to the environment
+      variables implied by [t] and its transitive dependency closure, the
+      resulting environment will also contain variables from the global
+      environment. Variables implied by the [t] and its dependencies will
+      clobber any existing variable in the global environment with the
+      exception of PATH. The value of PATH in the result will be the
+      concatenation of the PATH implied by [t] and its dependencies with
+      the existing PATH from the global environment. *)
   let exported_env t =
-    let base =
-      Env.Map.of_list_exn
-        [ Opam_switch.opam_switch_prefix_var_name, Path.Build.to_string t.paths.target_dir
-        ; "CDPATH", ""
-        ; "MAKELEVEL", ""
-        ; "OPAM_PACKAGE_NAME", Package.Name.to_string t.info.name
-        ; "OPAM_PACKAGE_VERSION", Package_version.to_string t.info.version
-        ; "OPAMCLI", "2.0"
-        ]
-    in
     let package_env =
       let vars =
-        build_env t
+        build_env_path_vars_of_deps t
         |> Env.Map.map ~f:Env_update.string_of_env_values
-        |> Env.Map.superpose base
+        |> Env.Map.superpose (base_build_env t)
       in
       Env.extend Env.empty ~vars
     in
@@ -950,7 +986,7 @@ module Action_expander = struct
     let+ { Artifacts_and_deps.binaries; dep_info } =
       Pkg.deps_closure pkg |> Artifacts_and_deps.of_closure
     in
-    let env = Pkg.build_env pkg in
+    let env = Pkg.build_env_path_vars_of_deps pkg in
     let depends =
       Package.Name.Map.add_exn
         dep_info
@@ -1670,7 +1706,7 @@ let which context =
 
 let ocamlpath context =
   let+ all_packages = all_packages context in
-  let env = Pkg.build_env_union all_packages in
+  let env = Pkg.build_env_path_vars_union all_packages in
   Env.Map.find env Dune_findlib.Config.ocamlpath_var
   |> Option.value ~default:[]
   |> List.map ~f:(function
@@ -1683,7 +1719,7 @@ let lock_dir_path = Lock_dir.get_path
 
 let exported_env context =
   let+ all_packages = all_packages context in
-  let env = Pkg.build_env_union all_packages in
+  let env = Pkg.build_env_path_vars_union all_packages in
   let vars = Env.Map.map env ~f:Env_update.string_of_env_values in
   Env.extend Env.empty ~vars
 ;;
