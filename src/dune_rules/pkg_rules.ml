@@ -925,17 +925,15 @@ module Action_expander = struct
             Value.to_string ~dir value
           in
           let env = Env_update.set env { update with value } in
-          let update =
-            let value =
-              match Env.Map.find env var with
-              | Some v -> Env_update.string_of_env_values v
-              | None ->
-                (* TODO *)
-                ""
-            in
-            var, value
-          in
-          env, update :: updates)
+          match Env.Map.find env var with
+          | Some v ->
+            let value = Env_update.string_of_env_values v in
+            env, (var, value) :: updates
+          | None ->
+            Code_error.raise
+              "While evaluating a withenv action an environment update failed to produce \
+               an environment containing the updated variable."
+              [ "update", Env_update.to_dyn String_with_vars.to_dyn update ])
     in
     let+ action =
       let expander = { expander with env } in
