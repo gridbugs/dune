@@ -196,8 +196,11 @@ module Context_for_dune = struct
   ;;
 
   let repo_candidate t name =
+    let is_base_compiler =
+      OpamPackage.Name.equal name (OpamPackage.Name.of_string "ocaml-base-compiler")
+    in
     let+ resolved = Opam_repo.load_all_versions t.repos name in
-    let available =
+    let x =
       OpamPackage.Version.Map.values resolved
       (* Note that although the packages are taken from a map,
          explicitly sorting them is still necessary. This sort applies
@@ -208,6 +211,17 @@ module Context_for_dune = struct
           t
           (Resolved_package.opam_file p1)
           (Resolved_package.opam_file p2))
+    in
+    (*
+       if is_base_compiler
+       then
+       List.iter x ~f:(fun (x : Resolved_package.t) ->
+       print_endline
+       (sprintf
+       "x %s"
+       (OpamPackage.Version.to_string (Resolved_package.package x).version))); *)
+    let available =
+      x
       |> List.map ~f:(fun resolved_package ->
         let opam_file = Resolved_package.opam_file resolved_package in
         let opam_file_result = available_or_error t opam_file in
@@ -261,12 +275,31 @@ module Context_for_dune = struct
         OpamFormula.And (acc, additional))
     in
     let package_is_local = Package_name.Map.mem t.local_packages name in
-    Resolve_opam_formula.apply_filter
-      (add_self_to_filter_env
-         package
-         (Solver_stats.Updater.wrap_env t.stats_updater (Solver_env.to_env t.solver_env)))
-      ~with_test:package_is_local
-      filtered_formula
+    let formula =
+      Resolve_opam_formula.apply_filter
+        (add_self_to_filter_env
+           package
+           (Solver_stats.Updater.wrap_env
+              t.stats_updater
+              (Solver_env.to_env t.solver_env)))
+        ~with_test:package_is_local
+        filtered_formula
+    in
+    let pkg_string = OpamPackage.to_string package in
+    if String.equal pkg_string "ocaml-base-compiler.5.1.1"
+    then (
+      let filtered_formula_string =
+        OpamFilter.string_of_filtered_formula filtered_formula
+      in
+      let formula_string = OpamFormula.to_string formula in
+      print_endline
+        (sprintf
+           "formula for %s:\n\n%s\n\n%s\n\n%s\n------"
+           (OpamPackage.to_string package)
+           filtered_formula_string
+           formula_string
+           (Solver_env.to_dyn t.solver_env |> Dyn.to_string)));
+    formula
   ;;
 end
 

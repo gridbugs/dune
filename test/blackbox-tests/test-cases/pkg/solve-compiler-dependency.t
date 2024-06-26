@@ -36,7 +36,7 @@ package is chosen, which is what we want.
 
 Now pretend that there was an alpha release of the current version of the
 compiler also in the repo.
-  $ mkpkg ocaml-base-compiler $CURRENT+alpha1 << EOF
+  $ mkpkg ocaml-base-compiler $CURRENT~rc1 << EOF
   > flags: [avoid-version]
   > EOF
 
