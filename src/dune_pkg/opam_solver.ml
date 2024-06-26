@@ -260,11 +260,10 @@ module Context_for_dune = struct
       |> List.fold_left ~init:filtered_formula ~f:(fun additional acc ->
         OpamFormula.And (acc, additional))
     in
+    let env = t.solver_env |> Solver_env.to_env in
     let package_is_local = Package_name.Map.mem t.local_packages name in
     Resolve_opam_formula.apply_filter
-      (add_self_to_filter_env
-         package
-         (Solver_stats.Updater.wrap_env t.stats_updater (Solver_env.to_env t.solver_env)))
+      (add_self_to_filter_env package (Solver_stats.Updater.wrap_env t.stats_updater env))
       ~with_test:package_is_local
       filtered_formula
   ;;

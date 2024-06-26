@@ -1,24 +1,61 @@
 open! Import
 module Relop = Dune_lang.Relop
 
+let remove_missing_packages
+  env
+  version_by_package_name
+  (opam_filtered_formula : OpamTypes.filtered_formula)
+  =
+  OpamFormula.map
+    (fun (opam_package_name, condition) ->
+      let package_name = Package_name.of_opam_package_name opam_package_name in
+      match Package_name.Map.find version_by_package_name package_name with
+      | None -> Empty
+      | Some version ->
+        let condition =
+          OpamFormula.map
+            (function
+              | OpamTypes.Filter _ as filter -> Atom filter
+              | OpamTypes.Constraint (relop, filter) as constraint_ ->
+                let constraint_version_string = OpamFilter.eval_to_string env filter in
+                Atom constraint_)
+            condition
+        in
+        Atom (opam_package_name, condition))
+    opam_filtered_formula
+;;
+
 let apply_filter env ~with_test (opam_filtered_formula : OpamTypes.filtered_formula)
   : OpamTypes.formula
   =
-  OpamFilter.gen_filter_formula
-    (OpamFormula.partial_eval (function
-      | OpamTypes.Filter flt ->
-        `Formula (Atom (OpamTypes.Filter (OpamFilter.partial_eval env flt)))
-      | Constraint (relop, filter) ->
-        let filter = OpamFilter.partial_eval env filter in
-        `Formula (Atom (Constraint (relop, filter)))))
-    opam_filtered_formula
-  |> OpamFilter.filter_deps
-       ~build:true
-       ~post:false
-       ~dev:false
-       ~default:false
-       ~test:with_test
-       ~doc:false
+  (*
+     print_endline
+     (sprintf "aaa %s" (OpamFilter.string_of_filtered_formula opam_filtered_formula));*)
+  let x =
+    OpamFilter.gen_filter_formula
+      (OpamFormula.partial_eval (function
+        | OpamTypes.Filter flt ->
+          `Formula (Atom (OpamTypes.Filter (OpamFilter.partial_eval env flt)))
+        | Constraint (relop, filter) ->
+          let filter = OpamFilter.partial_eval env filter in
+          `Formula (Atom (Constraint (relop, filter)))))
+      opam_filtered_formula
+  in
+  (*print_endline (sprintf "bbb %s" (OpamFilter.string_of_filtered_formula x));*)
+  let y = OpamFilter.partial_filter_formula env opam_filtered_formula in
+  (*print_endline (sprintf "ccc %s" (OpamFilter.string_of_filtered_formula y));*)
+  let z =
+    OpamFilter.filter_deps
+      x
+      ~build:true
+      ~post:false
+      ~dev:false
+      ~default:false
+      ~test:with_test
+      ~doc:false
+  in
+  (*print_endline (sprintf "ddd %s" (OpamFormula.to_string z));*)
+  z
 ;;
 
 module Version_constraint = struct
@@ -155,5 +192,8 @@ let formula_to_package_names version_by_package_name opam_formula =
 ;;
 
 let filtered_formula_to_package_names env ~with_test version_by_package_name formula =
-  formula_to_package_names version_by_package_name (apply_filter ~with_test env formula)
+  (*remove_missing_packages env version_by_package_name formula*)
+  formula
+  |> apply_filter ~with_test env
+  |> formula_to_package_names version_by_package_name
 ;;
