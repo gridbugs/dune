@@ -10,4 +10,4 @@ val build
   -> (Dune_rpc.Build_outcome_with_diagnostics.t, Dune_rpc.Response.Error.t) result Fiber.t
 
 (** dune rpc build command *)
-val cmd : unit Cmdliner.Cmd.t
+val cmd : unit Climate_cmdliner.Cmd.t
