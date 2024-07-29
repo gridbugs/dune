@@ -16,4 +16,4 @@ val request_exn
 val client_term : Common.Builder.t -> (unit -> 'a Fiber.t) -> 'a
 
 (** Cmdliner argument for a wait flag. *)
-val wait_term : bool Cmdliner.Term.t
+val wait_term : bool Climate_cmdliner.Term.t

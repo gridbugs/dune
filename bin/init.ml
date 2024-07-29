@@ -117,10 +117,7 @@ let public : Public_name.t option Term.t =
     "If called with an argument, make the component public under the given PUBLIC_NAME. \
      If supplied without an argument, use NAME."
   in
-  Arg.(
-    value
-    & opt ~vopt:(Some Public_name.Use_name) (some Public_name.conv) None
-    & info [ "public" ] ~docv ~doc)
+  Arg.(value & opt (some Public_name.conv) None & info [ "public" ] ~docv ~doc)
 ;;
 
 let inline_tests : bool Term.t =

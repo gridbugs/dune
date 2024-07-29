@@ -1,2 +1,2 @@
 (** dune rpc build command *)
-val cmd : unit Cmdliner.Cmd.t
+val cmd : unit Climate_cmdliner.Cmd.t

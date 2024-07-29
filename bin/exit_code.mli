@@ -4,5 +4,5 @@ type t =
   | Signal
 
 val all : t list
-val info : t -> Cmdliner.Cmd.Exit.info
+val info : t -> Climate_cmdliner.Cmd.Exit.info
 val code : t -> int

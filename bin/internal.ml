@@ -9,4 +9,11 @@ let latest_lang_version =
         |> Dune_lang.Syntax.Version.to_string))
 ;;
 
-let group = Cmd.group (Cmd.info "internal") [ Internal_dump.command; latest_lang_version ]
+let group =
+  Cmd.group
+    (Cmd.info "internal")
+    [ Internal_dump.command
+    ; latest_lang_version
+    ; Cmd.print_completion_script_bash "print-completion-script-bash"
+    ]
+;;

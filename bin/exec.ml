@@ -37,7 +37,7 @@ module Cmd_arg = struct
 
   let parse s =
     match Arg.conv_parser Arg.dep s with
-    | Ok (File sw) when Dune_lang.String_with_vars.has_pforms sw -> Expandable (sw, s)
+    | `Ok (File sw) when Dune_lang.String_with_vars.has_pforms sw -> Expandable (sw, s)
     | _ -> Terminal s
   ;;
 

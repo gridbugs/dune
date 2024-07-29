@@ -40,6 +40,8 @@ include struct
   module Executables = Executables
 end
 
+module Cmdliner = Climate_cmdliner
+
 include struct
   open Cmdliner
   module Term = Term

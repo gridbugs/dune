@@ -18,7 +18,7 @@ open struct
 end
 
 open struct
-  open Cmdliner
+  open Climate_cmdliner
   module Cmd = Cmd
   module Term = Term
   module Manpage = Manpage
@@ -47,15 +47,9 @@ let debug_backtraces =
 
 let default_build_dir = "_build"
 
-let one_of term1 term2 =
-  Term.ret
-  @@ let+ x, args1 = Term.with_used_args term1
-     and+ y, args2 = Term.with_used_args term2 in
-     match args1, args2 with
-     | _, [] -> `Ok x
-     | [], _ -> `Ok y
-     | arg1 :: _, arg2 :: _ ->
-       `Error (true, sprintf "Cannot use %s and %s simultaneously" arg1 arg2)
+let one_of term1 _term2 =
+  print_endline "TODO";
+  term1
 ;;
 
 let build_info =
@@ -204,16 +198,11 @@ module Options_implied_by_dash_p = struct
       Arg.(value & flag & info [ "always-show-command-line" ] ~docs ~doc)
     and+ promote_install_files =
       let doc = "Promote any generated <package>.install files to the source tree." in
-      Arg.(
-        last
-        & opt_all ~vopt:true bool [ false ]
-        & info [ "promote-install-files" ] ~docs ~doc)
+      Arg.(last & opt_all bool [ false ] & info [ "promote-install-files" ] ~docs ~doc)
     and+ require_dune_project_file =
       let doc = "Fail if a dune-project file is missing." in
       Arg.(
-        last
-        & opt_all ~vopt:true bool [ false ]
-        & info [ "require-dune-project-file" ] ~docs ~doc)
+        last & opt_all bool [ false ] & info [ "require-dune-project-file" ] ~docs ~doc)
     and+ ignore_lock_dir =
       let doc = "Ignore dune.lock/ directory." in
       Arg.(value & flag & info [ "ignore-lock-dir" ] ~docs ~doc)
@@ -249,7 +238,7 @@ module Options_implied_by_dash_p = struct
     in
     Arg.(
       value
-      & alias shorthand_for
+      & flag
       & info
           [ "release" ]
           ~docs
@@ -290,25 +279,8 @@ module Options_implied_by_dash_p = struct
     { t with only_packages }
   ;;
 
-  let dash_p =
-    Term.with_used_args
-      Arg.(
-        value
-        & alias_opt (fun s -> [ "--release"; "--only-packages"; s ])
-        & info
-            [ "p"; "for-release-of-packages" ]
-            ~docs
-            ~docv:"PACKAGES"
-            ~doc:
-              "Shorthand for $(b,--release --only-packages PACKAGE). You must use this \
-               option in your $(i,<package>.opam) files, in order to build only what's \
-               necessary when your project contains multiple packages as well as getting \
-               reproducible builds.")
-  ;;
-
   let term =
     let+ t = options
-    and+ _ = dash_p
     and+ profile =
       let doc = "Build profile. $(b,dev) if unspecified or $(b,release) if -p is set." in
       Arg.(
@@ -1317,7 +1289,7 @@ let examples = function
       `Blocks (prose :: code_lines)
     in
     let example_blocks = examples |> List.mapi ~f:block_of_example in
-    `Blocks (`S Cmdliner.Manpage.s_examples :: example_blocks)
+    `Blocks (`S Climate_cmdliner.Manpage.s_examples :: example_blocks)
 ;;
 
 (* Short reminders for the most used and useful commands *)
