@@ -1,4 +1,2 @@
-(** dune rpc command group *)
-val group : unit Cmdliner.Cmd.t
-
+val group : unit Climate_cmdliner.Cmd.t
 module Build = Build

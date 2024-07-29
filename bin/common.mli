@@ -1,5 +1,6 @@
 open Dune_config_file
 open Stdune
+module Cmdliner := Climate_cmdliner
 
 type t
 

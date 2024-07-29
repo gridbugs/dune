@@ -17,4 +17,4 @@ let doc = function
   | Signal -> "if it was interrupted by a signal."
 ;;
 
-let info e = Cmdliner.Cmd.Exit.info (code e) ~doc:(doc e)
+let info e = Climate_cmdliner.Cmd.Exit.info (code e) ~doc:(doc e)
