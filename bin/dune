@@ -33,7 +33,8 @@
   dune_upgrader
   dune_pkg
   dune_pkg_outdated
-  cmdliner
+  ;cmdliner
+  climate_cmdliner
   threads
   ; Kept to keep implicit_transitive_deps false working in 4.x
   threads.posix

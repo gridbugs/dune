@@ -394,8 +394,13 @@ let local_libraries =
     ; include_subdirs_unqualified = false
     ; special_builtin_support = None
     }
-  ; { path = "vendor/cmdliner/src"
-    ; main_module_name = None
+  ; { path = "vendor/climate/src/climate"
+    ; main_module_name = Some "Climate"
+    ; include_subdirs_unqualified = false
+    ; special_builtin_support = None
+    }
+  ; { path = "vendor/climate/src/cmdliner"
+    ; main_module_name = Some "Climate_cmdliner"
     ; include_subdirs_unqualified = false
     ; special_builtin_support = None
     }
