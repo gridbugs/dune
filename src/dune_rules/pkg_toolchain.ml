@@ -18,7 +18,7 @@ let base_dir () =
   path
 ;;
 
-let enabled = Config.make_toggle ~name:"toolchains" ~default:`Disabled
+let enabled = Config.make_toggle ~name:"toolchains" ~default:`Enabled
 
 let pkg_dir (pkg : Dune_pkg.Lock_dir.Pkg.t) =
   (* The name of this package's directory within the toolchains

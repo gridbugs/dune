@@ -1,6 +1,6 @@
 open! Import
 
-let enabled = Config.make_toggle ~name:"pkg_build_progress" ~default:`Disabled
+let enabled = Config.make_toggle ~name:"pkg_build_progress" ~default:`Enabled
 
 module Status = struct
   type t =
