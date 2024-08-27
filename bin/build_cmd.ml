@@ -30,6 +30,25 @@ let with_metrics ~common f =
     Fiber.return ())
 ;;
 
+let error_unless_lockdir_exists (setup : Import.Main.build_system) (common : Common.t) =
+  let open Memo.O in
+  Memo.List.iter setup.contexts ~f:(fun context ->
+    let* maybe_lock_dir_path = Dune_rules.Lock_dir.get_path (Context.name context) in
+    Memo.Option.iter maybe_lock_dir_path ~f:(fun lock_dir_path ->
+      let+ exists =
+        Dune_engine.Fs_memo.dir_exists
+          (Path.source lock_dir_path |> Path.as_outside_build_dir_exn)
+      in
+      if not exists
+      then
+        User_error.raise
+          [ Pp.textf
+              "Refusing to build because the lockdir %S is missing."
+              (Path.Source.to_string lock_dir_path)
+          ]
+          ~hints:[ Pp.concat [ Pp.text "Run"; User_message.command "dune pkg lock" ] ]))
+;;
+
 let run_build_system ~common ~request =
   let run ~(toplevel : unit Memo.Lazy.t) =
     with_metrics ~common (fun () -> build (fun () -> Memo.Lazy.force toplevel))
@@ -45,7 +64,13 @@ let run_build_system ~common ~request =
          in the [_build] directory. For now, it's unclear if optimising this is
          worth the effort. *)
       Cached_digest.invalidate_cached_timestamps ();
-      let* setup = Import.Main.setup () in
+      let* setup =
+        Import.Main.setup ()
+        >>| Memo.bind ~f:(fun setup ->
+          let open Memo.O in
+          let+ () = error_unless_lockdir_exists setup common in
+          setup)
+      in
       let request =
         Action_builder.bind (Action_builder.of_memo setup) ~f:(fun setup -> request setup)
       in
