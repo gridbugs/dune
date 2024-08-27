@@ -55,9 +55,24 @@
           });
         });
       };
+      dune-static-experimental-overlay = self: super: {
+        ocamlPackages = super.ocaml-ng.ocamlPackages_4_14.overrideScope (oself: osuper: {
+          dune_3 = osuper.dune_3.overrideAttrs (a: {
+            src = ./.;
+            preBuild = ''
+              ./configure --enable-toolchains --enable-pkg-build-progress
+              ocaml boot/bootstrap.ml --static'';
+          });
+        });
+      };
+
       pkgs-static = nixpkgs.legacyPackages.${system}.appendOverlays [
         ocaml-overlays.overlays.default
         dune-static-overlay
+      ];
+      pkgs-static-experimental = nixpkgs.legacyPackages.${system}.appendOverlays [
+        ocaml-overlays.overlays.default
+        dune-static-experimental-overlay
       ];
 
       ocamlformat =
@@ -85,7 +100,7 @@
       formatter = pkgs.nixpkgs-fmt;
 
       packages = {
-        default = with pkgs; stdenv.mkDerivation {
+        default = with pkgs; configureFlags: stdenv.mkDerivation {
           pname = "dune";
           version = "n/a";
           src = ./.;
@@ -99,9 +114,14 @@
           dontAddStaticConfigureFlags = true;
           configurePlatforms = [ ];
           installFlags = [ "PREFIX=${placeholder "out"}" "LIBDIR=$(OCAMLFIND_DESTDIR)" ];
+          configureFlags = configureFlags;
         };
-        dune = self.packages.${system}.default;
+        dune = self.packages.${system}.default [];
         dune-static = pkgs-static.pkgsCross.musl64.ocamlPackages.dune;
+        dune-experimental = self.packages.${system}.default [
+          "--enable-toolchains" "--enable-pkg-build-progress"
+        ];
+        dune-static-experimental = pkgs-static-experimental.pkgsCross.musl64.ocamlPackages.dune;
       };
 
       devShells =
