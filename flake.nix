@@ -47,32 +47,23 @@
           });
         })
       ];
-      dune-static-overlay = self: super: {
+      dune-static-overlay = configureFlags: self: super: {
         ocamlPackages = super.ocaml-ng.ocamlPackages_4_14.overrideScope (oself: osuper: {
           dune_3 = osuper.dune_3.overrideAttrs (a: {
             src = ./.;
             preBuild = "ocaml boot/bootstrap.ml --static";
-          });
-        });
-      };
-      dune-static-experimental-overlay = self: super: {
-        ocamlPackages = super.ocaml-ng.ocamlPackages_4_14.overrideScope (oself: osuper: {
-          dune_3 = osuper.dune_3.overrideAttrs (a: {
-            src = ./.;
-            preBuild = ''
-              ./configure --enable-toolchains --enable-pkg-build-progress
-              ocaml boot/bootstrap.ml --static'';
+            configureFlags = configureFlags;
           });
         });
       };
 
-      pkgs-static = nixpkgs.legacyPackages.${system}.appendOverlays [
+      pkgs-static = configureFlags: nixpkgs.legacyPackages.${system}.appendOverlays [
         ocaml-overlays.overlays.default
-        dune-static-overlay
+        (dune-static-overlay configureFlags)
       ];
-      pkgs-static-experimental = nixpkgs.legacyPackages.${system}.appendOverlays [
-        ocaml-overlays.overlays.default
-        dune-static-experimental-overlay
+
+      experimental-configure-flags = [
+        "--enable-toolchains" "--enable-pkg-build-progress"
       ];
 
       ocamlformat =
@@ -118,11 +109,9 @@
         };
         default = self.packages.${system}.withConfigureFlags [];
         dune = self.packages.${system}.default;
-        dune-static = pkgs-static.pkgsCross.musl64.ocamlPackages.dune;
-        dune-experimental = self.packages.${system}.withConfigureFlags [
-          "--enable-toolchains" "--enable-pkg-build-progress"
-        ];
-        dune-static-experimental = pkgs-static-experimental.pkgsCross.musl64.ocamlPackages.dune;
+        dune-static = (pkgs-static []).pkgsCross.musl64.ocamlPackages.dune;
+        dune-experimental = self.packages.${system}.withConfigureFlags experimental-configure-flags;
+        dune-static-experimental = (pkgs-static experimental-configure-flags).pkgsCross.musl64.ocamlPackages.dune;
       };
 
       devShells =
