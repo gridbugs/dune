@@ -100,7 +100,7 @@
       formatter = pkgs.nixpkgs-fmt;
 
       packages = {
-        default = with pkgs; configureFlags: stdenv.mkDerivation {
+        withConfigureFlags = with pkgs; configureFlags: stdenv.mkDerivation {
           pname = "dune";
           version = "n/a";
           src = ./.;
@@ -116,9 +116,10 @@
           installFlags = [ "PREFIX=${placeholder "out"}" "LIBDIR=$(OCAMLFIND_DESTDIR)" ];
           configureFlags = configureFlags;
         };
-        dune = self.packages.${system}.default [];
+        default = self.packages.${system}.withConfigureFlags [];
+        dune = self.packages.${system}.default;
         dune-static = pkgs-static.pkgsCross.musl64.ocamlPackages.dune;
-        dune-experimental = self.packages.${system}.default [
+        dune-experimental = self.packages.${system}.withConfigureFlags [
           "--enable-toolchains" "--enable-pkg-build-progress"
         ];
         dune-static-experimental = pkgs-static-experimental.pkgsCross.musl64.ocamlPackages.dune;
