@@ -26,6 +26,7 @@ let all : _ Cmdliner.Cmd.t list =
     ; Shutdown.command
     ; Diagnostics.command
     ; Monitor.command
+    ; Ocamllsp.command
     ]
   in
   let groups =

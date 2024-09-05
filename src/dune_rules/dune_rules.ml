@@ -69,6 +69,9 @@ module Melange_stanzas = Melange_stanzas
 module Executables = Executables
 module Tests = Tests
 module Stanzas = Stanzas
+module Pkg_dev_tool = Pkg_dev_tool
+module Lock_dir = Lock_dir
+module Pkg_build_progress = Pkg_build_progress
 
 module Install_rules = struct
   let install_file = Install_rules.install_file
