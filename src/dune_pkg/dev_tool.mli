@@ -1,6 +1,8 @@
 open! Import
 
-type t = Ocamlformat
+type t =
+  | Ocamlformat
+  | Ocamllsp
 
 val all : t list
 val equal : t -> t -> bool
