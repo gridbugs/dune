@@ -1,4 +1,4 @@
-Testing the conflicts that could occur between the dependencies of `dune-project`
+Testing the conflicts that could occur between the dependencies of "dune-project"
 and dev-tool dependencies.
 
 The scenario here is that the fake OCamlForamt dev-tool depends on
@@ -6,11 +6,8 @@ printer.1.0, and the project depends on a different version, printer.2.0.
 It shows those two do not conflict, and the dev-tools dependencies do not leak
 into the user build environment.
 
-  $ . ./helpers.sh
+  $ . ../helpers.sh
   $ mkrepo
-
-Enable the feature
-  $ DUNE_CONFIG__LOCK_DEV_TOOL=enabled
 
 Make a fake OCamlFormat:
   $ mkdir ocamlformat
@@ -19,17 +16,14 @@ Make a fake OCamlFormat:
   > (lang dune 3.13)
   > (package (name ocamlformat))
   > EOF
-
   $ cat > ocamlformat.ml <<EOF
   > let () = Printer.print ()
   > EOF
-
   $ cat > dune <<EOF
   > (executable
   >  (public_name ocamlformat)
   >  (libraries printer))
   > EOF
-
   $ cd ..
   $ tar -czf ocamlformat.tar.gz ocamlformat
   $ rm -rf ocamlformat
@@ -41,16 +35,13 @@ Make a printer lib(version 1) that prints "formatted":
   > (lang dune 3.13)
   > (package (name printer))
   > EOF
-
   $ cat > printer.ml <<EOF
   > let print () = print_endline "formatted"
   > EOF
-
   $ cat > dune <<EOF
   > (library
   >  (public_name printer))
   > EOF
-
   $ cd ..
   $ tar -czf printer.1.tar.gz printer
 
@@ -63,7 +54,7 @@ Make a printer lib(version 2) that prints "Hello world!":
   $ tar -czf printer.2.tar.gz printer
   $ rm -rf printer
 
-A printer 1.0 into `opam-repository`
+A printer 1.0 into "opam-repository"
   $ mkpkg printer 1.0 <<EOF
   > build: [
   >   [
@@ -82,7 +73,7 @@ A printer 1.0 into `opam-repository`
   > }
   > EOF
 
-Add printer.2.0 into `opam-repository`
+Add printer.2.0 into "opam-repository"
   $ mkpkg printer 2.0 <<EOF
   > build: [
   >   [
@@ -124,28 +115,23 @@ Make a package for the fake OCamlFormat library which depends on printer.1.0:
   > EOF
 
 Make a project that uses the fake OCamlFormat:
-
   $ cat > dune-project <<EOF
   > (lang dune 3.13)
   > (package
   >  (name foo)
   >  (depends (printer (= 2.0))))
   > EOF
-
   $ cat > foo.ml <<EOF
   > let () = Printer.print ()
   > EOF
-
   $ cat > dune <<EOF
   > (executable
   >  (public_name foo)
   >  (libraries printer))
   > EOF
-
   $ cat > .ocamlformat <<EOF
   > version = 0.26.2
   > EOF
-
   $ cat > dune-workspace <<EOF
   > (lang dune 3.13)
   > (lock_dir
@@ -182,12 +168,12 @@ versions of the same dependency.
   $ cat foo.ml
   formatted
 
-Revert `foo.ml`
+Revert "foo.ml"
   $ cat > foo.ml <<EOF
   > let () = Printer.print ()
   > EOF
 
-Now `dune-project` does not depend on printer, but the executable `foo` depends on it.
+Now "dune-project" does not depend on printer, but the executable "foo" depends on it.
   $ cat > dune-project <<EOF
   > (lang dune 3.13)
   > (package
@@ -207,12 +193,12 @@ Lock before formating
   $ cat foo.ml
   formatted
 
-Revert `foo.ml`
+Revert "foo.ml"
   $ cat > foo.ml <<EOF
   > let () = Printer.print ()
   > EOF
 
-There is no leak here. It is not taking the `printer` lib from dev-tools.
+There is no leak here. It is not taking the "printer" lib from dev-tools.
   $ dune clean && dune exec -- foo
   File "dune", line 3, characters 12-19:
   3 |  (libraries printer))
@@ -224,8 +210,8 @@ There is no leak here. It is not taking the `printer` lib from dev-tools.
   -> required by _build/install/default/bin/foo
   [1]
 
-Now the executable `foo` does not depend on printer, but `foo.ml` always uses Printer module from
-`printer` lib.
+Now the executable "foo" does not depend on printer, but "foo.ml" always uses Printer module from
+"printer" lib.
   $ cat > dune <<EOF
   > (executable
   >  (public_name foo))
@@ -241,7 +227,7 @@ We ensure that it solves
   $ cat foo.ml
   formatted
 
-Revert `foo.ml`
+Revert "foo.ml"
   $ cat > foo.ml <<EOF
   > let () = Printer.print ()
   > EOF
