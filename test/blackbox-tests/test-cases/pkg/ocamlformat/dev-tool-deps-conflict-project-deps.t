@@ -144,7 +144,6 @@ Make a project that uses the fake OCamlFormat:
   >  (source "file://$(pwd)/mock-opam-repository"))
   > EOF
 
-
 Lock the to trigger package management
   $ dune pkg lock
   Solution for dune.lock:
@@ -180,26 +179,17 @@ Now "dune-project" does not depend on printer, but the executable "foo" depends 
   >  (name foo))
   > EOF
 
-Lock before formating
+Relock the project.
   $ dune pkg lock
   Solution for dune.lock:
   (no dependencies to lock)
-  $ DUNE_CONFIG__LOCK_DEV_TOOL=enabled dune fmt
-  File "foo.ml", line 1, characters 0-0:
-  Error: Files _build/default/foo.ml and _build/default/.formatted/foo.ml
-  differ.
-  Promoting _build/default/.formatted/foo.ml to foo.ml.
-  [1]
-  $ cat foo.ml
+
+The OCamlFormat binary from the dev-tool.
+  $ ./_build/_private/default/.dev-tool/ocamlformat/ocamlformat/target/bin/ocamlformat foo.ml
   formatted
 
-Revert "foo.ml"
-  $ cat > foo.ml <<EOF
-  > let () = Printer.print ()
-  > EOF
-
 There is no leak here. It is not taking the "printer" lib from dev-tools.
-  $ dune clean && dune exec -- foo
+  $ dune exec -- foo
   File "dune", line 3, characters 12-19:
   3 |  (libraries printer))
                   ^^^^^^^
@@ -217,23 +207,12 @@ Now the executable "foo" does not depend on printer, but "foo.ml" always uses Pr
   >  (public_name foo))
   > EOF
 
-We ensure that it solves
-  $ DUNE_CONFIG__LOCK_DEV_TOOL=enabled dune fmt
-  File "foo.ml", line 1, characters 0-0:
-  Error: Files _build/default/foo.ml and _build/default/.formatted/foo.ml
-  differ.
-  Promoting _build/default/.formatted/foo.ml to foo.ml.
-  [1]
-  $ cat foo.ml
+The OCamlFormat binary from the dev-tool.
+  $ ./_build/_private/default/.dev-tool/ocamlformat/ocamlformat/target/bin/ocamlformat foo.ml
   formatted
 
-Revert "foo.ml"
-  $ cat > foo.ml <<EOF
-  > let () = Printer.print ()
-  > EOF
-
 There is no leak here. It is not taking Printer module from the printer of dev-tools dependency.
-  $ dune clean && dune exec -- foo
+  $ dune exec -- foo
   File "foo.ml", line 1, characters 9-22:
   1 | let () = Printer.print ()
                ^^^^^^^^^^^^^
