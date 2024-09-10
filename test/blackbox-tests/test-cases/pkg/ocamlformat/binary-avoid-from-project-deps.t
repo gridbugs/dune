@@ -75,7 +75,7 @@ Make a package for the fake OCamlformat 0.26.3:
   > }
   > EOF
 
-Make a project that depends on the fake ocamlformat.0.26.2:
+Make a project that depends on the fake OCamlFormat 0.26.2:
   $ cat > dune-project <<EOF
   > (lang dune 3.13)
   > (package
@@ -116,8 +116,8 @@ Lock and build the project to make OCamlFormat from the project dependencies ava
   $ dune pkg lock
   Solution for dune.lock:
   - ocamlformat.0.26.2
-Run `dune fmt` without the dev-tools feature enabled. This should invoke the ocamlformat
-executable from the package dependencies (ie. ocamlformat.0.26.2).
+Run `dune fmt` without the dev-tools feature enabled. This should invoke the `ocamlformat`
+executable from the package dependencies (i.e., `ocamlformat.0.26.2`).
   $ dune fmt
   File "foo.ml", line 1, characters 0-0:
   Error: Files _build/default/foo.ml and _build/default/.formatted/foo.ml
