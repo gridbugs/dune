@@ -1,4 +1,4 @@
-When an OCamlFormat version does not exists, `dune fmt` would fail with a
+When an OCamlFormat version does not exist, `dune fmt` would fail with a
 solving error.
 
   $ . ../helpers.sh
