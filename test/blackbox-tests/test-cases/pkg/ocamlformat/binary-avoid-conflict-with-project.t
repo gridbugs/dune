@@ -106,7 +106,7 @@ Update "foo.ml" file
   > let () = print_endline "Hello, world"
   > EOF
 
-When the dev-tool feature is disabled dune runs the OCamlFormat binary from the
+When the dev-tool feature is disabled Dune runs the OCamlFormat binary from the
 PATH and not the dev-tool one.
   $ dune build
   fake ocamlformat from PATH
