@@ -1,7 +1,7 @@
 Testing the conflicts that could occur between the dependencies of "dune-project"
 and dev-tool dependencies.
 
-The scenario here is that the fake OCamlForamt dev-tool depends on
+The scenario here is that the fake OCamlFormat dev-tool depends on
 printer.1.0, and the project depends on a different version, printer.2.0.
 It shows those two do not conflict, and the dev-tools dependencies do not leak
 into the user build environment.
@@ -54,7 +54,7 @@ Make a printer lib(version 2) that prints "Hello world!":
   $ tar -czf printer.2.tar.gz printer
   $ rm -rf printer
 
-A printer 1.0 into "opam-repository"
+Add printer 1.0 into "opam-repository"
   $ mkpkg printer 1.0 <<EOF
   > build: [
   >   [
@@ -114,7 +114,7 @@ Make a package for the fake OCamlFormat library which depends on printer.1.0:
   > }
   > EOF
 
-Make a project that uses the fake OCamlFormat:
+Make a project that depends on printer.2.0:
   $ cat > dune-project <<EOF
   > (lang dune 3.13)
   > (package
@@ -172,7 +172,11 @@ Revert "foo.ml"
   > let () = Printer.print ()
   > EOF
 
-Now "dune-project" does not depend on printer, but the executable "foo" depends on it.
+Update "dune-project", removing the dependency on the "printer" package. This
+demonstrates that even though OCamlFormat depends on the "printer" package, building the
+project will not work because "foo"'s dependency on the library "printer" (specified in
+the "dune" file) cannot be resolved. This is because dependencies of dev-tools and
+dependencies of the project are isolated from one another.
   $ cat > dune-project <<EOF
   > (lang dune 3.13)
   > (package
@@ -200,8 +204,9 @@ There is no leak here. It is not taking the "printer" lib from dev-tools.
   -> required by _build/install/default/bin/foo
   [1]
 
-Now the executable "foo" does not depend on printer, but "foo.ml" always uses Printer module from
-"printer" lib.
+Update the executable "foo" to not depend on the library "printer", but "foo.ml" still
+refers to the `Printer` module. This won't compile, demonstrating that modules from
+dev-tools don't leak into the project.
   $ cat > dune <<EOF
   > (executable
   >  (public_name foo))

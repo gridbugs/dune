@@ -1,4 +1,5 @@
-Make sure that the "dune-project" does not use the OCamlFormat binary dev-tool.
+If the dev-tool feature is enabled then `dune fmt` should invoke the `ocamlformat`
+executable from the dev-tool and not the one from PATH.
 
   $ . ../helpers.sh
   $ mkrepo
@@ -72,7 +73,7 @@ Make a project that uses the fake ocamlformat:
   >  (source "file://$(pwd)/mock-opam-repository"))
   > EOF
 
-Add a fake binary in the PATH
+Add a fake executable in the PATH
   $ mkdir .bin
   $ cat > .bin/ocamlformat <<EOF
   > #!/bin/sh
@@ -105,6 +106,7 @@ Update "foo.ml" file
   > let () = print_endline "Hello, world"
   > EOF
 
-It uses the OCamlFormat binary from the PATH and not the dev-tool one.
+When the dev-tool feature is disabled dune runs the OCamlFormat binary from the
+PATH and not the dev-tool one.
   $ dune build
   fake ocamlformat from PATH

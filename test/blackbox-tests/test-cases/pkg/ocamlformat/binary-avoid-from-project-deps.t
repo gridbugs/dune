@@ -1,5 +1,9 @@
-Make sure that $ dune fmt does not take the OCamlFormat binary inside the "dune-project"
+If the dev-tool feature is enabled then `dune fmt` should invoke the `ocamlformat`
+executable from the dev-tool and not the one from the project's regular package
 dependencies.
+
+If the dev-tool feature is not enabled then `dune fmt` should invoke the
+`ocamlformat` executable from the project's regular package dependencies.
 
   $ . ../helpers.sh
   $ mkrepo
@@ -33,7 +37,7 @@ Make a fake ocamlformat.0.26.3:
   $ tar -czf ocamlformat-0.26.3.tar.gz ocamlformat
   $ rm -rf ocamlformat
 
-Make a package for the fake OCamlformat library:
+Make a package for the fake OCamlformat 0.26.2:
   $ mkpkg ocamlformat 0.26.2 <<EOF
   > build: [
   >   [
@@ -52,7 +56,7 @@ Make a package for the fake OCamlformat library:
   > }
   > EOF
 
-Make a package for the fake OCamlformat library:
+Make a package for the fake OCamlformat 0.26.3:
   $ mkpkg ocamlformat 0.26.3 <<EOF
   > build: [
   >   [
@@ -71,7 +75,7 @@ Make a package for the fake OCamlformat library:
   > }
   > EOF
 
-Make a project that uses the fake ocamlformat:
+Make a project that depends on the fake ocamlformat.0.26.2:
   $ cat > dune-project <<EOF
   > (lang dune 3.13)
   > (package
@@ -108,10 +112,12 @@ Add a fake binary in the PATH
   $ which ocamlformat
   $TESTCASE_ROOT/.bin/ocamlformat
 
-Lock and build the project to make OCamlFormat from project-dependencies available.
+Lock and build the project to make OCamlFormat from the project dependencies available.
   $ dune pkg lock
   Solution for dune.lock:
   - ocamlformat.0.26.2
+Run `dune fmt` without the dev-tools feature enabled. This should invoke the ocamlformat
+executable from the package dependencies (ie. ocamlformat.0.26.2).
   $ dune fmt
   File "foo.ml", line 1, characters 0-0:
   Error: Files _build/default/foo.ml and _build/default/.formatted/foo.ml
@@ -130,7 +136,9 @@ Update "foo.ml"
   > let () = print_endline "Hello, world"
   > EOF
 
-Format using the feature, it does not choose the OCamlFormat binary from the project dependencies.
+Format using the dev-tools feature, it does not invoke the OCamlFormat binary from
+the project dependencies (0.26.2) but instead builds and runs the OCamlFormat binary as a
+dev-tool (0.26.3).
   $ DUNE_CONFIG__LOCK_DEV_TOOL=enabled dune fmt
   Solution for dev-tools.locks/ocamlformat:
   - ocamlformat.0.26.3
@@ -151,8 +159,10 @@ Update "foo.ml"
   > let () = print_endline "Hello, world"
   > EOF
 
-Retry, without the feature and without cleaning, it uses the OCamlFormat binary from the project
-dependnecies. This is making sure that the two different binaries does not mix up.
+Retry, without dev-tools feature and without cleaning. This time it uses the OCamlFormat
+binary from the project dependencies rather than the dev-tool. This exercises the
+behavior when OCamlFormat is installed simultaneously as both a dev-tool and as a
+regular package dependency.
   $ rm -rf dev-tools.locks/ocamlformat
   $ dune fmt
   File "foo.ml", line 1, characters 0-0:
