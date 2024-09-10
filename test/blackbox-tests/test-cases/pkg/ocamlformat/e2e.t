@@ -101,7 +101,7 @@ Make a project that uses the fake ocamlformat:
   >  (source "file://$(pwd)/mock-opam-repository"))
   > EOF
 
-Without a ".ocamlformat" file, `dune fmt` takes the latest version of
+Without a `.ocamlformat` file, `dune fmt` takes the latest version of
 OCamlFormat.
   $ DUNE_CONFIG__LOCK_DEV_TOOL=enabled dune fmt
   Solution for dev-tools.locks/ocamlformat:
