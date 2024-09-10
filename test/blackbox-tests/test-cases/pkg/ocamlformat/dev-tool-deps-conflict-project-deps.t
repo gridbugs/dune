@@ -175,7 +175,7 @@ Revert "foo.ml"
 Update "dune-project", removing the dependency on the "printer" package. This
 demonstrates that even though OCamlFormat depends on the "printer" package, building the
 project will not work because "foo"'s dependency on the library "printer" (specified in
-the "dune" file) cannot be resolved. This is because dependencies of dev-tools and
+the `dune` file) cannot be resolved. This is because dependencies of dev-tools and
 dependencies of the project are isolated from one another.
   $ cat > dune-project <<EOF
   > (lang dune 3.13)
