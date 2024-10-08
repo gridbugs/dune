@@ -48,7 +48,7 @@ let debug_backtraces =
 let default_build_dir = "_build"
 
 let one_of term1 _term2 =
-  print_endline "TODO";
+  Printf.eprintf "TODO\n";
   term1
 ;;
 
