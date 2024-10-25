@@ -11,6 +11,8 @@ let name_of_string_exn string =
 exception Usage
 
 module Arg_parser = struct
+  module Completion_ = Completion
+
   module Context = struct
     type t =
       { raw_arg_table : Raw_arg_table.t
@@ -47,6 +49,13 @@ module Arg_parser = struct
   type 'a parse = string -> ('a, [ `Msg of string ]) result
   type 'a print = Format.formatter -> 'a -> unit
 
+  let to_string_print to_string fmt value = Format.pp_print_string fmt (to_string value)
+
+  let value_to_string print value =
+    print Format.str_formatter value;
+    Format.flush_str_formatter ()
+  ;;
+
   module Completion = struct
     type command_line = Command_line.Rich.t =
       { program : string
@@ -54,30 +63,46 @@ module Arg_parser = struct
       ; args : string list
       }
 
-    (* Roughly duplicated from [Spec.Untyped_completion.t] but
-       with types that correspond to the type of the [conv] it will be
-       part of. *)
-    type _ t =
-      | File : string t
-      | Values : 'a list -> 'a t
-      | Reentrant : (command_line -> 'a list) -> 'a t
-      | Some : 'a t -> 'a option t
+    type 'a t =
+      | File
+      | Strings of string list
+      | Strings_reentrant of (command_line -> string list)
+      | Values of 'a list
+      | Values_reentrant of (command_line -> 'a list)
 
     let file = File
     let values values = Values values
-    let reentrant f = Reentrant f
+    let reentrant f = Values_reentrant f
 
     let reentrant_parse parser =
       let f command_line = eval parser ~command_line ~ignore_errors:true in
-      Reentrant f
+      Values_reentrant f
     ;;
 
     let reentrant_thunk f =
       let f _ = f () in
-      Reentrant f
+      Values_reentrant f
     ;;
 
-    let some t = Some t
+    let map t ~f =
+      match t with
+      | (File | Strings _ | Strings_reentrant _) as t' -> t'
+      | Values xs -> Values (List.map ~f xs)
+      | Values_reentrant get_suggestions ->
+        Values_reentrant (fun command_line -> List.map ~f (get_suggestions command_line))
+    ;;
+
+    let some t = map t ~f:Option.some
+
+    let stringify t print =
+      match t with
+      | (File | Strings _ | Strings_reentrant _) as t' -> t'
+      | Values xs -> Strings (List.map ~f:(value_to_string print) xs)
+      | Values_reentrant get_suggestions ->
+        Strings_reentrant
+          (fun command_line ->
+            List.map ~f:(value_to_string print) (get_suggestions command_line))
+    ;;
   end
 
   type 'a conv =
@@ -87,34 +112,23 @@ module Arg_parser = struct
     ; completion : 'a Completion.t option
     }
 
-  let value_to_string print value =
-    print Format.str_formatter value;
-    Format.flush_str_formatter ()
+  let make_conv ~parse ~print ?(default_value_name = "VALUE") ?(completion = None) () =
+    { parse; print; default_value_name; completion }
   ;;
 
-  let rec conv_untyped_completion
-    : type a.
-      a print
-      -> a Completion.t
-      -> (Command_line.Rich.t -> string list) Completion_spec.Hint.t
-    =
-    fun print completion ->
-    match completion with
+  let conv_untyped_completion print completion =
+    match (completion : _ Completion.t) with
     | File -> Completion_spec.Hint.File
+    | Strings strings -> Completion_spec.Hint.Values strings
+    | Strings_reentrant f -> Completion_spec.Hint.Reentrant f
     | Values values ->
       Completion_spec.Hint.Values (List.map values ~f:(value_to_string print))
-    | Reentrant f ->
+    | Values_reentrant f ->
       Completion_spec.Hint.Reentrant
         (fun command_line -> f command_line |> List.map ~f:(value_to_string print))
-    | Some completion ->
-      let print ppf v =
-        let v' : a = Some v in
-        print ppf v'
-      in
-      conv_untyped_completion print completion
   ;;
 
-  (* A conv can have a built in completion, but it's also possible for
+  (* A conv can have a built-in completion, but it's also possible for
      this to be overridden for a specific parser. This is a helper
      function for converting a given completion, falling back to the
      built-in completion if none is given. *)
@@ -172,7 +186,7 @@ module Arg_parser = struct
     { string with default_value_name = "FILE"; completion = Some Completion.file }
   ;;
 
-  let enum ?(default_value_name = "VALUE") l ~eq =
+  let enum ?(default_value_name = "VALUE") ?(eq = ( = )) l =
     let all_names = List.map l ~f:fst in
     let all_values = List.map l ~f:snd in
     let duplicate_names =
@@ -650,6 +664,7 @@ module Completion_config = struct
     ; program_exe_for_reentrant_query : [ `Program_name | `Other of string ]
     ; global_symbol_prefix : [ `Random | `Custom of string ]
     ; command_hash_in_function_names : bool
+    ; options : Completion.Options.t
     }
 
   (* An internal argument parser accepting arguments for configuring
@@ -692,6 +707,28 @@ module Completion_config = struct
            generated functions, but such collisions are rare in practice and disabling \
            hashes makes the generated code easier to read."
         [ "no-command-hash-in-function-names" ]
+    and+ no_comments =
+      flag ~desc:"Omit comments from the generated completion script." [ "no-comments" ]
+    and+ no_whitespace =
+      flag
+        ~desc:"Remove unnecessary whitespace from generated completion script."
+        [ "no-whitespace" ]
+    and+ minify_global_names =
+      flag
+        ~desc:
+          "Rename global variables and functions in completion script to be as short as \
+           possible."
+        [ "minify-global-names" ]
+    and+ minify_local_variables =
+      flag
+        ~desc:"Use short names for local variables in generated bash script."
+        [ "minify-local-variables" ]
+    and+ optimize_case_statements =
+      flag
+        ~desc:
+          "Combine sequences of contiguous case bodies in cases statements, merging \
+           their patterns."
+        [ "optimize-case-statements" ]
     in
     let program_name =
       match program_name with
@@ -708,10 +745,19 @@ module Completion_config = struct
       | Some global_symbol_prefix -> `Custom global_symbol_prefix
       | None -> `Random
     in
+    let options =
+      { Completion_.Options.no_comments
+      ; no_whitespace
+      ; minify_global_names
+      ; minify_local_variables
+      ; optimize_case_statements
+      }
+    in
     { program_name
     ; program_exe_for_reentrant_query
     ; global_symbol_prefix
     ; command_hash_in_function_names = not no_command_hash_in_function_names
+    ; options
     }
   ;;
 end
@@ -723,6 +769,17 @@ module Eval_config = struct
     { print_reentrant_completions_name =
         Name.of_string_exn "print-reentrant-completion-hints"
     }
+  ;;
+end
+
+module Program_name = struct
+  type t =
+    | Argv0
+    | Literal of string
+
+  let get = function
+    | Argv0 -> Sys.argv.(0)
+    | Literal name -> name
   ;;
 end
 
@@ -854,17 +911,18 @@ module Command = struct
     ?(program_exe_for_reentrant_query = `Program_name)
     ?(global_symbol_prefix = `Random)
     ?(command_hash_in_function_names = true)
+    ?(program_name = Program_name.Argv0)
+    ?(options = Completion.Options.default)
     t
-    ~program_name
     =
     completion_spec t
     |> Completion.generate_bash
          ~print_reentrant_completions_name:eval_config.print_reentrant_completions_name
-         ~program_name
+         ~program_name:(Program_name.get program_name)
          ~program_exe_for_reentrant_query
          ~global_symbol_prefix
          ~command_hash_in_function_names
-         ~options:Completion.Options.default
+         ~options
   ;;
 
   module Reentrant_query = struct
@@ -963,13 +1021,14 @@ module Command = struct
           ~child_subcommands:[]
       in
       (* Print the completion script. Note that this can't be combined
-         into the regular parser logic because it needs to be the
+         into the regular parser logic because it needs to know the
          completion spec, which isn't available to regular argument
          parsers. *)
       let { Completion_config.program_name
           ; program_exe_for_reentrant_query
           ; global_symbol_prefix
           ; command_hash_in_function_names
+          ; options
           }
         =
         Arg_parser.eval arg_parser ~command_line ~ignore_errors:false
@@ -982,7 +1041,7 @@ module Command = struct
            ~print_reentrant_completions_name:eval_config.print_reentrant_completions_name
            ~global_symbol_prefix
            ~command_hash_in_function_names
-           ~options:Completion.Options.default);
+           ~options);
       exit 0
   ;;
 
@@ -994,13 +1053,17 @@ module Command = struct
     | Usage -> exit 0
   ;;
 
-  let eval ?(eval_config = Eval_config.default) ?(program_name = `Argv0) t args =
-    let program =
-      match program_name with
-      | `Argv0 -> Sys.argv.(0)
-      | `Literal name -> name
-    in
-    eval ~eval_config t { Command_line.Raw.args; program }
+  let run_singleton ?(eval_config = Eval_config.default) ?desc arg_parser =
+    run ~eval_config (singleton ?desc arg_parser)
+  ;;
+
+  let eval
+    ?(eval_config = Eval_config.default)
+    ?(program_name = Program_name.Argv0)
+    t
+    args
+    =
+    eval ~eval_config t { Command_line.Raw.args; program = Program_name.get program_name }
   ;;
 end
 

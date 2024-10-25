@@ -6,6 +6,9 @@ module Arg_parser : sig
   type 'a parse = string -> ('a, [ `Msg of string ]) result
   type 'a print = Format.formatter -> 'a -> unit
 
+  (** Make a ['a print] value from a to_string function *)
+  val to_string_print : ('a -> string) -> 'a print
+
   module Completion : sig
     type 'a parser := 'a t
     type 'a t
@@ -16,7 +19,12 @@ module Arg_parser : sig
       ; args : string list
       }
 
-    val file : string t
+    (** Complete using paths relative to the current directory. This can be
+        used with [conv]s of any type though care must be taken that the conv
+        knows how to parse paths. This requirement isn't enforced with types
+        as it would be too restrictive to be useful in general. *)
+    val file : _ t
+
     val values : 'a list -> 'a t
     val reentrant : (command_line -> 'a list) -> 'a t
     val reentrant_parse : 'a list parser -> 'a t
@@ -25,6 +33,13 @@ module Arg_parser : sig
     (** For use in cases the optionality of a value being
         parsed/completed needs to represented in the value itself. *)
     val some : 'a t -> 'a option t
+
+    (** Flatten the completion information into plain strings. This can be used
+        to supply completion hints that otherwise wouldn't satisfy the type
+        constraints within a [conv], though care must be taken to ensure that
+        the [conv] knows how to parse the suggestions as this will no longer be
+        enforced by the type system when this function is used. *)
+    val stringify : 'a t -> 'a print -> _ t
   end
 
   (** Knows how to interpret strings on the command line as a particular type
@@ -39,6 +54,15 @@ module Arg_parser : sig
            message (e.g. "--foo=STRING"). *)
     ; completion : 'a Completion.t option
     }
+
+  (** Helper function for constructing ['_ conv]s *)
+  val make_conv
+    :  parse:'a parse
+    -> print:'a print
+    -> ?default_value_name:string
+    -> ?completion:'a Completion.t option
+    -> unit
+    -> 'a conv
 
   val string : string conv
   val int : int conv
@@ -55,8 +79,8 @@ module Arg_parser : sig
       name. *)
   val enum
     :  ?default_value_name:string
+    -> ?eq:('a -> 'a -> bool)
     -> (string * 'a) list
-    -> eq:('a -> 'a -> bool)
     -> 'a conv
 
   (** [string_enum values ~eq] returns a conv for a concrete set of possible
@@ -187,7 +211,7 @@ module Arg_parser : sig
     -> 'a conv
     -> 'a list t
 
-  (** [pos_left i conv] parses all positional arguments at positions greater
+  (** [pos_right i conv] parses all positional arguments at positions greater
       than i. *)
   val pos_right
     :  ?value_name:string
@@ -237,6 +261,12 @@ end
 
 (** Raised if the command being evaluated printed a usage message *)
 exception Usage
+
+module Program_name : sig
+  type t =
+    | Argv0
+    | Literal of string
+end
 
 module Command : sig
   type 'a t
@@ -302,8 +332,9 @@ module Command : sig
     -> ?program_exe_for_reentrant_query:[ `Program_name | `Other of string ]
     -> ?global_symbol_prefix:[ `Random | `Custom of string ]
     -> ?command_hash_in_function_names:bool
+    -> ?program_name:Program_name.t
+    -> ?options:Completion.Options.t
     -> _ t
-    -> program_name:string
     -> string
 
   (** Run the command on given arguments. Raises a [Parse_error.E] if
@@ -312,7 +343,7 @@ module Command : sig
       [program_name] argument. *)
   val eval
     :  ?eval_config:Eval_config.t
-    -> ?program_name:[ `Argv0 | `Literal of string ]
+    -> ?program_name:Program_name.t
     -> 'a t
     -> string list
     -> 'a
@@ -320,6 +351,9 @@ module Command : sig
   (** Run the command line parser returning its result. Parse errors are
       handled by printing an error message to stderr and exiting. *)
   val run : ?eval_config:Eval_config.t -> 'a t -> 'a
+
+  (** [run_singleton arg_parser] is a shorthand for [run (singleton arg_parser)] *)
+  val run_singleton : ?eval_config:Eval_config.t -> ?desc:string -> 'a Arg_parser.t -> 'a
 end
 
 module Parse_error : sig

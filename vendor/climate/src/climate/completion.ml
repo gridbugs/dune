@@ -4,12 +4,19 @@ open Shell_dsl
 module Options = struct
   type t =
     { no_comments : bool
-    ; minify_global_names : bool
     ; no_whitespace : bool
+    ; minify_global_names : bool
+    ; minify_local_variables : bool
+    ; optimize_case_statements : bool
     }
 
   let default =
-    { no_comments = true; minify_global_names = true; no_whitespace = true }
+    { no_comments = false
+    ; no_whitespace = false
+    ; minify_global_names = false
+    ; minify_local_variables = false
+    ; optimize_case_statements = false
+    }
   ;;
 end
 
@@ -171,6 +178,9 @@ module Reentrant_query = struct
 
   let run ~program_exe ~print_reentrant_completions_name =
     let open Stmt in
+    let query_index = Local_variable.create "query_index" ~short_name:"i" in
+    let current_word = Local_variable.create "current_word" ~short_name:"w" in
+    let command = Local_variable.create "command" ~short_name:"c" in
     function_
       "reentrant_query_run"
       [ comment
@@ -178,16 +188,24 @@ module Reentrant_query = struct
            the cursor). It invokes the program with the given subcommand path and some \
            special arguments that cause it to emit the result of the requested query. \
            The result is then added to COMPREPLY."
-      ; raw "local query_index=$1"
-      ; raw "local current_word=$2"
-      ; raw "local command suggestions"
-      ; raw
-          (sprintf
-             "command=\"%s %s=$query_index -- $COMP_LINE\""
-             program_exe
-             (Name.to_string_with_dashes print_reentrant_completions_name))
-      ; raw "suggestions=$(eval \"$command\")"
-      ; raw "COMPREPLY+=($(compgen -W \"$suggestions\" -- \"$current_word\"))"
+      ; declare_local_variables
+          [ local_init query_index (Value.argument 1)
+          ; local_init current_word (Value.argument 2)
+          ]
+      ; declare_local_variables
+          [ local_init
+              command
+              (Value.literal_with_local_variable query_index ~f:(fun query_index ->
+                 sprintf
+                   "%s %s=$%s -- $COMP_LINE"
+                   program_exe
+                   (Name.to_string_with_dashes print_reentrant_completions_name)
+                   query_index))
+          ]
+      ; raw_with_local_variable2
+          command
+          current_word
+          ~f:(sprintf "COMPREPLY+=($(compgen -W \"$(eval \"$%s\")\" -- \"$%s\"))")
       ]
   ;;
 end
@@ -201,57 +219,6 @@ let hint_add_reply (hint : int Completion_spec.Hint.t) ~reentrant_query_run ~cur
   | Reentrant query_index ->
     call reentrant_query_run [ Value.literal (string_of_int query_index); current_word ]
 ;;
-
-module Named_arg_value_completion = struct
-  open Global_named_value
-
-  let function_name
-    ~(named_arg : _ Completion_spec.Named_arg.t)
-    ~subcommand_path
-    ~command_hash_in_function_names
-    =
-    let prefix =
-      if command_hash_in_function_names
-      then (
-        (* Add the hash of the name to the function name to avoid
-           collisions between function names *)
-        let hash = Hashtbl.hash (named_arg, subcommand_path) in
-        sprintf "hash_%d__" hash)
-      else ""
-    in
-    sprintf
-      "%s%s_%s"
-      prefix
-      (String.concat ~sep:"__" (List.rev subcommand_path))
-      (Name.to_string_with_dashes named_arg.name)
-  ;;
-
-  (* Generates function for completing the argument to a particular
-     named argument to a particular subcommand with an associated hint. *)
-  let function_
-    ~(named_arg : _ Completion_spec.Named_arg.t)
-    ~subcommand_path
-    ~reentrant_query_run
-    ~command_hash_in_function_names
-    ~hint
-    =
-    let open Stmt in
-    function_
-      (function_name ~named_arg ~subcommand_path ~command_hash_in_function_names)
-      [ comment
-          (sprintf
-             "completions for: %s %s"
-             (String.concat ~sep:" " subcommand_path)
-             (Name.to_string_with_dashes named_arg.name))
-      ; if_
-          (Cond.call Comp_words.Traverse.is_at_cursor [])
-          [ comment "The cursor is on the parameter of the named argument."
-          ; hint_add_reply ~reentrant_query_run ~current_word:(Value.literal "$1") hint
-          ; return (Value.global Status.done_)
-          ]
-      ]
-  ;;
-end
 
 module Subcommand_and_positional_arg_completion = struct
   open Global_named_value
@@ -276,12 +243,18 @@ module Subcommand_and_positional_arg_completion = struct
     ~command_hash_in_function_names
     =
     let open Stmt in
+    let prev_word_was_named_argument_with_value =
+      Local_variable.create "prev_word_was_named_argumen_with_value" ~short_name:"p"
+    in
+    let positional_argument_index =
+      Local_variable.create "positional_argument_index" ~short_name:"i"
+    in
     let base_function_name =
       function_name ~subcommand_path ~command_hash_in_function_names
     in
     let complete_positional_args_function =
       let stmt_of_hint =
-        hint_add_reply ~reentrant_query_run ~current_word:(Value.literal "$1")
+        hint_add_reply ~reentrant_query_run ~current_word:(Value.argument 1)
       in
       let cases =
         List.mapi spec.parser_spec.positional_args_hints.finite_args ~f:(fun i hint ->
@@ -290,12 +263,12 @@ module Subcommand_and_positional_arg_completion = struct
             | Some hint -> stmt_of_hint hint
             | None -> noop
           in
-          pattern @@ string_of_int i, [ stmt ])
+          Case_pattern.singleton @@ string_of_int i, [ stmt ])
         @
         match spec.parser_spec.positional_args_hints.repeated_arg with
         | None -> []
-        | Some `No_hint -> [ pattern "*", [ noop ] ]
-        | Some (`Hint hint) -> [ pattern "*", [ stmt_of_hint hint ] ]
+        | Some `No_hint -> [ Case_pattern.singleton "*", [ noop ] ]
+        | Some (`Hint hint) -> [ Case_pattern.singleton "*", [ stmt_of_hint hint ] ]
       in
       if List.is_empty cases
       then None
@@ -308,13 +281,74 @@ module Subcommand_and_positional_arg_completion = struct
                   the index of the current positional argument on the command line and \
                   adds comp replies for that positional argument begining with that \
                   prefix."
-             ; case (Value.literal "$2") cases
+             ; case (Value.argument 2) cases
              ])
     in
     List.filter_opt
       [ complete_positional_args_function
       ; Some
-          (let cases =
+          (let named_arg_cases =
+             let named_arguments_with_hints =
+               List.filter_map
+                 spec.parser_spec.named_args
+                 ~f:(fun (named_arg : _ Completion_spec.Named_arg.t) ->
+                   if named_arg.has_param
+                   then
+                     Option.map named_arg.hint ~f:(fun hint ->
+                       let stmts =
+                         [ comment
+                             (sprintf
+                                "completions for: %s %s"
+                                (String.concat ~sep:" " subcommand_path)
+                                (Name.to_string_with_dashes
+                                   (Completion_spec.Named_arg.first_name named_arg)))
+                         ; hint_add_reply
+                             hint
+                             ~reentrant_query_run
+                             ~current_word:(Value.argument 2)
+                         ; return (Value.global Status.done_)
+                         ]
+                       in
+                       Completion_spec.Named_arg.to_patterns_with_dashes named_arg, stmts)
+                   else None)
+             in
+             (* Arguments with values but no hints. The completion script will
+                default to file completions in this case. *)
+             let named_arguments_without_hints =
+               let patterns =
+                 List.filter_map
+                   spec.parser_spec.named_args
+                   ~f:(fun (named_arg : _ Completion_spec.Named_arg.t) ->
+                     if named_arg.has_param && Option.is_none named_arg.hint
+                     then
+                       Some (Completion_spec.Named_arg.to_patterns_with_dashes named_arg)
+                     else None)
+               in
+               Nonempty_list.of_list patterns
+               |> Option.map ~f:(fun patterns ->
+                 ( Case_pattern.union patterns
+                 , [ comment "case for named arguments without hints"
+                   ; call Add_reply.files [ Value.argument 2 ]
+                   ; return (Value.global Status.done_)
+                   ] ))
+               |> Option.to_list
+             in
+             named_arguments_without_hints @ named_arguments_with_hints
+           in
+           let subcommand_cases =
+             let named_args =
+               List.map
+                 spec.parser_spec.named_args
+                 ~f:Completion_spec.Named_arg.to_patterns_with_dashes
+               |> Nonempty_list.of_list
+               |> Option.map ~f:(fun patterns ->
+                 ( Case_pattern.union patterns
+                 , [ raw_with_local_variable
+                       prev_word_was_named_argument_with_value
+                       ~f:(sprintf "%s=1")
+                   ] ))
+               |> Option.to_list
+             in
              let subcommands =
                List.map
                  spec.subcommands
@@ -331,82 +365,38 @@ module Subcommand_and_positional_arg_completion = struct
                      ; return (Value.literal "$?")
                      ]
                    in
-                   pattern subcommand.name, stmts)
+                   Case_pattern.singleton subcommand.name, stmts)
              in
-             let named_arguments_with_hints =
-               Completion_spec.named_args_sorted spec
-               |> List.filter_map ~f:(fun (named_arg : _ Completion_spec.Named_arg.t) ->
-                 if named_arg.has_param
-                 then
-                   Option.map named_arg.hint ~f:(fun _hint ->
-                     let completion_function_name =
-                       Global_name.make
-                         (Named_arg_value_completion.function_name
-                            ~named_arg
-                            ~subcommand_path
-                            ~command_hash_in_function_names)
-                     in
-                     let stmts =
-                       [ comment
-                           (sprintf
-                              "completions for: %s %s"
-                              (String.concat ~sep:" " subcommand_path)
-                              (Name.to_string_with_dashes named_arg.name))
-                       ; raw_with_global_name
-                           ~f:(sprintf "%s \"$2\"")
-                           completion_function_name
-                       ; raw "status_=$?"
-                       ; if_
-                           (Cond.test_raw "\"$status_\" -ne 0")
-                           [ return (Value.literal "$status_") ]
-                       ; raw "prev_word_was_named_argument_with_value=1"
-                       ]
-                     in
-                     pattern @@ Name.to_string_with_dashes named_arg.name, stmts)
-                 else None)
-             in
-             let named_arguments_without_hints =
-               let names =
-                 Completion_spec.named_args_sorted spec
-                 |> List.filter_map ~f:(fun (named_arg : _ Completion_spec.Named_arg.t) ->
-                   if named_arg.has_param && Option.is_none named_arg.hint
-                   then Some (Name.to_string_with_dashes named_arg.name)
-                   else None)
-               in
-               Nonempty_list.of_list names
-               |> Option.map ~f:(fun names ->
-                 ( patterns names
-                 , [ comment "case for named arguments without hints"
-                   ; if_
-                       (Cond.call Comp_words.Traverse.is_at_cursor [])
-                       [ comment "The cursor is on the parameter of the named argument."
-                       ; call Add_reply.files [ Value.literal "$2" ]
-                       ; return (Value.global Status.done_)
-                       ]
-                   ] ))
-               |> Option.to_list
-             in
-             subcommands
-             @ named_arguments_without_hints
-             @ named_arguments_with_hints
-             @ [ ( pattern "-*"
+             named_args
+             @ subcommands
+             @ [ ( Case_pattern.singleton "-*"
                  , [ comment "Ignore other words that look like arguments"
-                   ; raw "prev_word_was_named_argument_with_value=0"
+                   ; raw_with_local_variable
+                       prev_word_was_named_argument_with_value
+                       ~f:(sprintf "%s=0")
                    ] )
-               ; ( pattern "*"
+               ; ( Case_pattern.singleton "*"
                  , [ if_
-                       (Cond.test_raw
-                          "\"$prev_word_was_named_argument_with_value\" -eq 0")
-                       [ raw "positional_argument_index=$((positional_argument_index+1))"
+                       (Cond.test_raw_of_string_with_local_variable
+                          prev_word_was_named_argument_with_value
+                          ~f:(sprintf "\"$%s\" -eq 0"))
+                       [ raw_with_local_variable2
+                           positional_argument_index
+                           positional_argument_index
+                           ~f:(sprintf "%s=$((%s+1))")
                        ]
-                   ; raw "prev_word_was_named_argument_with_value=0"
+                   ; raw_with_local_variable
+                       prev_word_was_named_argument_with_value
+                       ~f:(sprintf "%s=0")
                    ] )
                ]
            in
            function_
              base_function_name
-             [ raw "local prev_word_was_named_argument_with_value=0"
-             ; raw "local positional_argument_index=0"
+             [ declare_local_variables
+                 [ local_init prev_word_was_named_argument_with_value (Value.literal "0")
+                 ; local_init positional_argument_index (Value.literal "0")
+                 ]
              ; while_
                  Cond.true_
                  [ if_
@@ -431,15 +421,15 @@ module Subcommand_and_positional_arg_completion = struct
                           in
                           call
                             Add_reply.fixed
-                            [ Value.literal "$2"
+                            [ Value.argument 2
                             ; Value.literal space_separated_subcommands
                             ])
                      ; (match complete_positional_args_function with
                         | Some complete_positional_args_function ->
                           call
                             complete_positional_args_function
-                            [ Value.literal "$2"
-                            ; Value.literal "$positional_argument_index"
+                            [ Value.argument 2
+                            ; Value.local_variable positional_argument_index
                             ]
                         | None ->
                           comment
@@ -451,37 +441,56 @@ module Subcommand_and_positional_arg_completion = struct
                              "If there were no suggestions for subcommands or positional \
                               arguments, try completing named arguments instead."
                          ; (let space_separated_names =
-                              Completion_spec.named_args_sorted spec
-                              |> List.map
-                                   ~f:(fun (named_arg : _ Completion_spec.Named_arg.t) ->
-                                     Name.to_string_with_dashes named_arg.name)
+                              List.append
+                                (Completion_spec.Parser_spec
+                                 .all_long_names_with_dashes_sorted
+                                   spec.parser_spec)
+                                (Completion_spec.Parser_spec
+                                 .all_short_names_with_dashes_sorted
+                                   spec.parser_spec)
                               |> String.concat ~sep:" "
                             in
                             call
                               Add_reply.fixed
-                              [ Value.literal "$2"; Value.literal space_separated_names ])
+                              [ Value.argument 2; Value.literal space_separated_names ])
                          ]
                      ; return (Value.global Status.done_)
                      ]
                      ~else_:
-                       [ raw "local current_word status_"
-                       ; raw_with_global_name
-                           ~f:(sprintf "current_word=$(%s)")
-                           (name Comp_words.Traverse.get_current)
-                       ; raw "status_=$?"
-                       ; if_
-                           (Cond.test_raw "\"$status_\" -ne 0")
-                           [ return (Value.literal "$status_") ]
-                       ; call Comp_words.Traverse.advance []
-                       ; if_
-                           (Cond.call Comp_words.Traverse.is_past_cursor [])
-                           [ comment
-                               "Bounds check to catch errors in the implementation of \
-                                the completion script"
-                           ; return (Value.global Status.error_word_index_past_cursor)
-                           ]
-                       ; case (Value.literal "$current_word") cases
-                       ]
+                       (let current_word =
+                          Local_variable.create "current_word" ~short_name:"w"
+                        in
+                        (* Avoid the variable name "status" as it's reserved by some shells. *)
+                        let status = Local_variable.create "status_" ~short_name:"s" in
+                        [ declare_local_variables
+                            [ local_decl current_word; local_decl status ]
+                        ; raw_with_local_variable_and_global_name
+                            current_word
+                            (name Comp_words.Traverse.get_current)
+                            ~f:(sprintf "%s=$(%s)")
+                        ; raw_with_local_variable status ~f:(sprintf "%s=$?")
+                        ; if_
+                            (Cond.test_raw_of_string_with_local_variable
+                               status
+                               ~f:(sprintf "\"$%s\" -ne 0"))
+                            [ return (Value.local_variable status) ]
+                        ; call Comp_words.Traverse.advance []
+                        ; if_
+                            (Cond.call Comp_words.Traverse.is_past_cursor [])
+                            [ comment
+                                "Bounds check to catch errors in the implementation of \
+                                 the completion script"
+                            ; return (Value.global Status.error_word_index_past_cursor)
+                            ]
+                        ; if_
+                            (Cond.call Comp_words.Traverse.is_at_cursor [])
+                            [ comment
+                                "The parser has reached the word under the cursor. \
+                                 Attempt to complete it and then exit."
+                            ; case (Value.local_variable current_word) named_arg_cases
+                            ]
+                        ; case (Value.local_variable current_word) subcommand_cases
+                        ])
                  ]
              ])
       ]
@@ -535,8 +544,8 @@ module Completion_entry_point = struct
                 completion_root_name
             ; case
                 (Value.literal "$?")
-                [ pattern Status.done_value, [ noop ]
-                ; ( pattern Status.error_word_index_past_cursor_value
+                [ Case_pattern.singleton Status.done_value, [ noop ]
+                ; ( Case_pattern.singleton Status.error_word_index_past_cursor_value
                   , [ call
                         Error.print
                         [ Value.literal
@@ -544,7 +553,7 @@ module Completion_entry_point = struct
                              line beyond the current cursor position"
                         ]
                     ] )
-                ; ( pattern Status.error_word_out_of_bounds_value
+                ; ( Case_pattern.singleton Status.error_word_out_of_bounds_value
                   , [ call
                         Error.print
                         [ Value.literal
@@ -552,7 +561,7 @@ module Completion_entry_point = struct
                              end of the command line"
                         ]
                     ] )
-                ; ( pattern "*"
+                ; ( Case_pattern.singleton "*"
                   , [ call
                         Error.print
                         [ Value.literal "Unknown error in completion script" ]
@@ -569,21 +578,6 @@ let rec functions_of_spec
   ~reentrant_query_run
   ~command_hash_in_function_names
   =
-  let named_arg_completion_functions =
-    List.filter_map
-      spec.parser_spec.named_args
-      ~f:(fun (named_arg : _ Completion_spec.Named_arg.t) ->
-        if named_arg.has_param
-        then
-          Option.map named_arg.hint ~f:(fun hint ->
-            Named_arg_value_completion.function_
-              ~named_arg
-              ~subcommand_path
-              ~reentrant_query_run
-              ~command_hash_in_function_names
-              ~hint)
-        else None)
-  in
   let subcommand_and_positional_arg_completion =
     Subcommand_and_positional_arg_completion.functions
       ~spec
@@ -602,17 +596,16 @@ let rec functions_of_spec
           ~reentrant_query_run
           ~command_hash_in_function_names)
   in
-  subcommand_completions
-  @ named_arg_completion_functions
-  @ subcommand_and_positional_arg_completion
+  subcommand_completions @ subcommand_and_positional_arg_completion
 ;;
 
-let bash_header ~program_name ~global_symbol_prefix =
+let bash_header ~program_name ~global_symbol_prefix ~local_variable_style ~indent_size =
   let open Stmt in
   [ raw "#!/usr/bin/env bash"
   ; comment (sprintf "Completion script for %s. Generated by climate." program_name)
   ]
-  |> List.map ~f:(Bash.stmt_to_string ~global_symbol_prefix)
+  |> List.map
+       ~f:(Bash.stmt_to_string ~global_symbol_prefix ~local_variable_style ~indent_size)
   |> String.concat ~sep:"\n"
 ;;
 
@@ -646,7 +639,18 @@ module Short_symbol = struct
   ;;
 end
 
-let post_process_globals { Options.no_comments; minify_global_names; _ } globals =
+let post_process_globals
+  { Options.no_comments; minify_global_names; optimize_case_statements; _ }
+  globals
+  =
+  let globals =
+    if optimize_case_statements
+    then
+      List.map
+        globals
+        ~f:(Global_named_value.with_function_stmts ~f:Stmt.optimize_case_stmts)
+    else globals
+  in
   let globals =
     if no_comments
     then
@@ -761,14 +765,23 @@ let generate_bash
     | `Random -> make_random_prefix ()
     | `Custom s -> s
   in
+  let indent_size = if options.no_whitespace then 0 else 2 in
+  let local_variable_style = if options.minify_local_variables then `Short else `Full in
   String.concat
     ~sep:(if options.no_whitespace then "\n" else "\n\n")
-    ([ bash_header ~program_name ~global_symbol_prefix ]
-     @ List.map all_functions ~f:(Bash.global_named_value_to_string ~global_symbol_prefix)
+    ([ bash_header ~program_name ~global_symbol_prefix ~local_variable_style ~indent_size
+     ]
+     @ List.map
+         all_functions
+         ~f:
+           (Bash.global_named_value_to_string
+              ~global_symbol_prefix
+              ~local_variable_style
+              ~indent_size)
      @ [ Stmt.raw_with_global_name
            (Global_named_value.name (List.hd all_functions))
            ~f:(fun complete_entry ->
              sprintf "complete -F %s %s" complete_entry program_name)
-         |> Bash.stmt_to_string ~global_symbol_prefix
+         |> Bash.stmt_to_string ~global_symbol_prefix ~local_variable_style ~indent_size
        ])
 ;;
