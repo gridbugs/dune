@@ -96,7 +96,7 @@ module Conf = struct
   let sign_hook_of_context (context : Context.t) =
     let open Memo.O in
     let+ config =
-      let+ ocaml = Context.ocaml context in
+      let* ocaml = Context.ocaml context in
       ocaml.ocaml_config
     in
     match Ocaml_config.system config, Ocaml_config.architecture config with
@@ -123,8 +123,9 @@ module Conf = struct
     let get_config_path = function
       | Sourceroot -> Memo.return @@ Some (Path.source Path.Source.root)
       | Stdlib ->
-        let+ ocaml = Context.ocaml context in
-        Some ocaml.lib_config.stdlib_dir
+        let* ocaml = Context.ocaml context in
+        let+ lib_config = ocaml.lib_config in
+        Some lib_config.stdlib_dir
     in
     let hardcoded_ocaml_path =
       let install_dir =
@@ -155,8 +156,9 @@ module Conf = struct
     let get_config_path = function
       | Sourceroot -> Memo.return None
       | Stdlib ->
-        let+ ocaml = Context.ocaml context in
-        Some ocaml.lib_config.stdlib_dir
+        let* ocaml = Context.ocaml context in
+        let+ lib_config = ocaml.lib_config in
+        Some lib_config.stdlib_dir
     in
     let sign_hook = sign_hook_of_context context in
     { get_location; get_vcs; get_config_path; hardcoded_ocaml_path; sign_hook }

@@ -17,10 +17,9 @@ let add_packages_env context ~base stanzas packages =
   let* base =
     let* context = Context.DB.get context in
     let* ocaml = Context.ocaml context in
-    let+ default_ocamlpath = Context.default_ocamlpath context in
-    Env.extend_env
-      base
-      (dune_sites_env ~default_ocamlpath ~stdlib:ocaml.lib_config.stdlib_dir)
+    let+ default_ocamlpath = Context.default_ocamlpath context
+    and+ lib_config = ocaml.lib_config in
+    Env.extend_env base (dune_sites_env ~default_ocamlpath ~stdlib:lib_config.stdlib_dir)
   in
   let+ env_dune_dir_locations =
     let init =

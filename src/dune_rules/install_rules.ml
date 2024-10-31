@@ -123,11 +123,12 @@ end = struct
     (match modes.byte with
      | false -> Memo.return false
      | true ->
-       let+ ocaml = Context.ocaml ctx
-       and+ dynamically_linked_foreign_archives =
+       let* ocaml = Context.ocaml ctx
+       and* dynamically_linked_foreign_archives =
          Context.dynamically_linked_foreign_archives ctx
        in
-       Dynlink_supported.get_ocaml_config dynlink ocaml.ocaml_config
+       let+ ocaml_config = ocaml.ocaml_config in
+       Dynlink_supported.get_ocaml_config dynlink ocaml_config
        && dynamically_linked_foreign_archives)
     >>| function
     | false -> []
@@ -173,7 +174,7 @@ end = struct
     let loc = lib.buildable.loc in
     let ctx = Super_context.context sctx in
     let* lib_config =
-      let+ ocaml = Context.ocaml ctx in
+      let* ocaml = Context.ocaml ctx in
       ocaml.lib_config
     in
     let make_entry ?(loc = loc) = make_entry lib_subdir ~loc in
@@ -664,8 +665,9 @@ end = struct
                [Lib_archives.make] *)
             let dir = Obj_dir.obj_dir obj_dir in
             let* ext_obj =
-              let+ ocaml = Context.ocaml ctx in
-              ocaml.lib_config.ext_obj
+              let* ocaml = Context.ocaml ctx in
+              let+ lib_config = ocaml.lib_config in
+              lib_config.ext_obj
             in
             let+ foreign_sources = Dir_contents.foreign_sources dir_contents in
             Foreign_sources.for_lib ~name foreign_sources

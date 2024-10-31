@@ -379,10 +379,11 @@ let make
   ~scope
   =
   let preprocessor_deps = preprocessor_deps @ instrumentation_deps in
-  let+ ocaml = Context.ocaml (Super_context.context sctx) in
+  let* ocaml = Context.ocaml (Super_context.context sctx) in
+  let+ version = ocaml.version in
   let preprocess =
     Module_name.Per_item.map preprocess ~f:(fun pp ->
-      Preprocess.remove_future_syntax ~for_:Compiler pp ocaml.version)
+      Preprocess.remove_future_syntax ~for_:Compiler pp version)
   in
   let preprocessor_deps, sandbox = Dep_conf_eval.unnamed preprocessor_deps ~expander in
   let sandbox =

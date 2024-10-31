@@ -122,13 +122,14 @@ let build_cm
          | Ok _ as s -> Some s
          | Error _ -> None)
   in
+  let* lib_config = ocaml.lib_config in
   (let open Option.O in
    let* compiler = compiler in
    let ml_kind = Lib_mode.Cm_kind.source cm_kind in
    let+ src = Module.file m ~ml_kind in
    let dst = Obj_dir.Module.cm_file_exn obj_dir m ~kind:cm_kind in
    let obj =
-     Obj_dir.Module.obj_file obj_dir m ~kind:(Ocaml Cmx) ~ext:ocaml.lib_config.ext_obj
+     Obj_dir.Module.obj_file obj_dir m ~kind:(Ocaml Cmx) ~ext:lib_config.ext_obj
    in
    let open Memo.O in
    let* extra_args, extra_deps, other_targets =
@@ -182,6 +183,7 @@ let build_cm
      Action_builder.dyn_paths_unit
        (Action_builder.map module_deps ~f:(other_cm_files ~opaque ~cm_kind ~obj_dir))
    in
+   let* version = ocaml.version in
    let other_targets, cmt_args =
      match cm_kind with
      | Ocaml Cmx -> other_targets, Command.Args.empty
@@ -194,7 +196,7 @@ let build_cm
          let annots =
            [ "-bin-annot" ]
            @
-           if Version.supports_bin_annot_occurrences ocaml.version
+           if Version.supports_bin_annot_occurrences version
            then [ "-bin-annot-occurrences" ]
            else []
          in
@@ -203,7 +205,7 @@ let build_cm
    in
    let opaque_arg : _ Command.Args.t =
      let intf_only = cm_kind = Ocaml Cmi && not (Module.has m ~ml_kind:Impl) in
-     if opaque || (intf_only && Ocaml.Version.supports_opaque_for_mli ocaml.version)
+     if opaque || (intf_only && Ocaml.Version.supports_opaque_for_mli version)
      then A "-opaque"
      else Command.Args.empty
    in
@@ -292,9 +294,11 @@ let build_module ?(force_write_cmi = false) ?(precompiled_cmi = false) cctx m =
       and* () =
         let ctx = Compilation_context.context cctx in
         let ocaml = Compilation_context.ocaml cctx in
+        let* ocaml_config = ocaml.ocaml_config
+        and* version = ocaml.version in
         let can_split =
-          Ocaml.Version.supports_split_at_emit ocaml.version
-          || Ocaml_config.is_dev_version ocaml.ocaml_config
+          Ocaml.Version.supports_split_at_emit version
+          || Ocaml_config.is_dev_version ocaml_config
         in
         match Context.fdo_target_exe ctx, can_split with
         | None, _ -> build_cm ~cm_kind:(Ocaml Cmx) ~phase:None
@@ -446,17 +450,17 @@ module Alias_module = struct
 end
 
 let build_alias_module cctx group =
+  let open Memo.O in
   let alias_file () =
     let project = Compilation_context.scope cctx |> Scope.project in
     let modules = Compilation_context.modules cctx in
     Alias_module.of_modules project modules group |> Alias_module.to_ml
   in
   let alias_module = Modules.Group.alias group in
-  let cctx = Compilation_context.for_alias_module cctx alias_module in
+  let* cctx = Compilation_context.for_alias_module cctx alias_module in
   let sctx = Compilation_context.super_context cctx in
   let file = Option.value_exn (Module.file alias_module ~ml_kind:Impl) in
   let dir = Compilation_context.dir cctx in
-  let open Memo.O in
   let* () =
     Super_context.add_rule
       ~loc:Loc.none
@@ -465,7 +469,7 @@ let build_alias_module cctx group =
       (Action_builder.delayed alias_file
        |> Action_builder.write_file_dyn (Path.as_in_build_dir_exn file))
   in
-  let cctx = Compilation_context.for_alias_module cctx alias_module in
+  let* cctx = Compilation_context.for_alias_module cctx alias_module in
   build_module cctx alias_module
 ;;
 
@@ -521,13 +525,14 @@ let build_all cctx =
            let cctx = Lazy.force for_wrapped_compat in
            build_module cctx m
          | _ ->
-           let cctx =
+           let open Memo.O in
+           let* cctx =
              if Modules.With_vlib.is_stdlib_alias modules m
              then
                (* XXX it would probably be simpler if the flags were just for this
                   module in the definition of the stanza *)
                Compilation_context.for_alias_module cctx m
-             else cctx
+             else Memo.return cctx
            in
            build_module cctx m))
 ;;

@@ -35,7 +35,7 @@ let ocaml_flags sctx ~dir (spec : Ocaml_flags.Spec.t) =
   | false -> Memo.return flags
   | true ->
     let+ ocaml_version =
-      let+ ocaml = Super_context.context sctx |> Context.ocaml in
+      let* ocaml = Super_context.context sctx |> Context.ocaml in
       ocaml.version
     in
     Ocaml_flags.with_vendored_flags ~ocaml_version flags

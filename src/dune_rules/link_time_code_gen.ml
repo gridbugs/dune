@@ -35,7 +35,7 @@ let generate_and_compile_module cctx ~precompiled_cmi ~obj_name ~name ~lib ~code
        Action_builder.write_file_dyn ml code)
   in
   let+ () =
-    let cctx =
+    let* cctx =
       Compilation_context.for_module_generated_at_link_time cctx ~requires ~module_
     in
     Module_compilation.build_module ~precompiled_cmi cctx module_
@@ -133,7 +133,7 @@ let build_info_code cctx ~libs ~api_version =
       let p = Path.Build.drop_build_context_exn (Compilation_context.dir cctx) in
       placeholder placeholders p
   in
-  let+ libs, placeholders =
+  let* libs, placeholders =
     Memo.List.fold_left ~init:([], placeholders) libs ~f:(fun (libs, placeholders) lib ->
       let+ v, placeholders =
         match Lib_info.version (Lib.info lib) with
@@ -170,9 +170,12 @@ let build_info_code cctx ~libs ~api_version =
     None
 [@@inline never]
 |ocaml};
-  let fmt_eval : _ format6 =
+  let+ ocaml_version =
     let ocaml = Compilation_context.ocaml cctx in
-    if Ocaml.Version.has_sys_opaque_identity ocaml.version
+    ocaml.version
+  in
+  let fmt_eval : _ format6 =
+    if Ocaml.Version.has_sys_opaque_identity ocaml_version
     then "let %s = eval (Sys.opaque_identity %S)"
     else "let %s = eval %S"
   in

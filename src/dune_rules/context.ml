@@ -179,8 +179,9 @@ let dynamically_linked_foreign_archives t =
   match t.builder.dynamically_linked_foreign_archives with
   | false -> Memo.return false
   | true ->
-    let+ ocaml = ocaml t in
-    Ocaml_config.supports_shared_libraries ocaml.ocaml_config
+    let* ocaml = ocaml t in
+    let+ ocaml_config = ocaml.ocaml_config in
+    Ocaml_config.supports_shared_libraries ocaml_config
 ;;
 
 let fdo_target_exe t = t.builder.fdo_target_exe
@@ -463,7 +464,7 @@ let create (builder : Builder.t) ~(kind : Kind.t) =
           "loading the OCaml compiler for context %S"
           (Context_name.to_string builder.name))
       (fun () ->
-        let+ ocaml, env =
+        let* ocaml, env =
           let* findlib = Memo.Lazy.force findlib
           and* env = builder.env in
           let toolchain kind =
@@ -487,9 +488,12 @@ let create (builder : Builder.t) ~(kind : Kind.t) =
                let+ toolchain, _ = Action_builder.evaluate_and_collect_facts toolchain in
                toolchain, `Default)
         in
-        Ocaml_toolchain.register_response_file_support ocaml;
-        if Option.is_some builder.fdo_target_exe
-        then Ocaml_toolchain.check_fdo_support ocaml builder.name;
+        let* () = Ocaml_toolchain.register_response_file_support ocaml in
+        let+ () =
+          if Option.is_some builder.fdo_target_exe
+          then Ocaml_toolchain.check_fdo_support ocaml builder.name
+          else Memo.return ()
+        in
         ocaml, env)
   in
   let default_ocamlpath =
@@ -503,9 +507,10 @@ let create (builder : Builder.t) ~(kind : Kind.t) =
           ~findlib_toolchain:builder.findlib_toolchain
           ~env
         |> Build_environment_kind.findlib_paths ~findlib ~ocaml_bin:ocaml.bin_dir
-      in
-      if Ocaml.Version.has_META_files ocaml.version
-      then ocaml.lib_config.stdlib_dir :: default_ocamlpath
+      and+ version = ocaml.version
+      and+ lib_config = ocaml.lib_config in
+      if Ocaml.Version.has_META_files version
+      then lib_config.stdlib_dir :: default_ocamlpath
       else default_ocamlpath)
   in
   let builder =

@@ -308,8 +308,8 @@ let build_ppx_driver sctx ~scope ~target ~pps ~pp_names =
              sprintf "let () = %s ()\n" driver.info.main)))
   and* linkages =
     let ctx = Super_context.context sctx in
-    let+ ocaml = Context.ocaml ctx in
-    [ Exe.Linkage.native_or_custom ocaml ]
+    let* ocaml = Context.ocaml ctx in
+    Exe.Linkage.native_or_custom ocaml >>| List.singleton
   and+ cctx =
     let obj_dir = Obj_dir.for_pp ~dir in
     let requires_compile = Resolve.map driver_and_libs ~f:snd in

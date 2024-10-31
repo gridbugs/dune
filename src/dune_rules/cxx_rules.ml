@@ -22,7 +22,7 @@ let rules ~sctx ~dir =
   let ocfg =
     Action_builder.of_memo
     @@
-    let+ ocaml = Super_context.context sctx |> Context.ocaml in
+    let* ocaml = Super_context.context sctx |> Context.ocaml in
     ocaml.ocaml_config
   in
   (* let tmp = Path.External.of_string (Filename.get_temp_dir_name ()) in *)

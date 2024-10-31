@@ -194,11 +194,14 @@ let gen_rules sctx t ~dir ~scope =
       let+ link_args = Link_flags.get ~use_standard_cxx_flags:false link_flags in
       Command.Args.As link_args
     in
+    let* native_or_custom =
+      Exe.Linkage.native_or_custom (Compilation_context.ocaml cctx)
+    in
     Exe.build_and_link
       cctx
       ~link_args
       ~program:{ name; main_module_name; loc }
-      ~linkages:[ Exe.Linkage.native_or_custom (Compilation_context.ocaml cctx) ]
+      ~linkages:[ native_or_custom ]
       ~promote:None
   in
   let action =

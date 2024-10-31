@@ -10,13 +10,15 @@ let linkages
   ~explicit_js_mode
   ~(jsoo_compilation_mode : Js_of_ocaml.Compilation_mode.t)
   =
+  let open Memo.O in
   let module L = Executables.Link_mode in
-  let l =
+  let* l =
     let has_native = Result.is_ok ocaml.ocamlopt in
-    let modes =
+    let+ modes =
       L.Map.to_list exes.modes
       |> List.map ~f:(fun (mode, loc) ->
         Exe.Linkage.of_user_config ocaml ~dynamically_linked_foreign_archives ~loc mode)
+      |> Memo.all
     in
     let modes =
       if has_native
@@ -44,10 +46,11 @@ let linkages
   in
   (* If bytecode was requested but not native or best version, add custom
      linking *)
+  let+ version = ocaml.version in
   if L.Map.mem exes.modes L.byte
      && (not (L.Map.mem exes.modes L.native))
      && not (L.Map.mem exes.modes L.exe)
-  then Exe.Linkage.custom ocaml.version :: l
+  then Exe.Linkage.custom version :: l
   else l
 ;;
 
@@ -103,7 +106,7 @@ let o_files
     in
     let* foreign_o_files =
       let+ { Lib_config.ext_obj; _ } =
-        let+ ocaml = Super_context.context sctx |> Context.ocaml in
+        let* ocaml = Super_context.context sctx |> Context.ocaml in
         ocaml.lib_config
       in
       Foreign.Objects.build_paths exes.buildable.extra_objects ~ext_obj ~dir
@@ -145,7 +148,7 @@ let executables_rules
   let explicit_js_mode = Dune_project.explicit_js_mode project in
   let* linkages =
     let* jsoo_compilation_mode = Jsoo_rules.js_of_ocaml_compilation_mode sctx ~dir in
-    let+ dynamically_linked_foreign_archives =
+    let* dynamically_linked_foreign_archives =
       Context.dynamically_linked_foreign_archives ctx
     in
     linkages
@@ -194,7 +197,7 @@ let executables_rules
       ~melange_package_name:None
       ~package:exes.package
   in
-  let lib_config = ocaml.lib_config in
+  let* lib_config = ocaml.lib_config in
   let stdlib_dir = lib_config.stdlib_dir in
   let* requires_compile = Compilation_context.requires_compile cctx in
   let* requires_hidden = Compilation_context.requires_hidden cctx in

@@ -488,12 +488,13 @@ let mdx_prog_gen t ~sctx ~dir ~scope ~mdx_prog =
       ()
   in
   let ext = ".bc.exe" in
+  let* version = ocaml_toolchain.version in
   let+ (_ : Exe.dep_graphs) =
     Exe.build_and_link
       cctx
       ~program:{ name; main_module_name; loc }
       ~link_args:(Action_builder.return (Command.Args.A "-linkall"))
-      ~linkages:[ Exe.Linkage.custom_with_ext ~ext ocaml_toolchain.version ]
+      ~linkages:[ Exe.Linkage.custom_with_ext ~ext version ]
       ~promote:None
   in
   Path.Build.relative dir (name ^ ext)

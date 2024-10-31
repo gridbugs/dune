@@ -408,7 +408,7 @@ module Crawl = struct
       in
       let* pp_map =
         let+ version =
-          let+ ocaml = Super_context.context sctx |> Context.ocaml in
+          let* ocaml = Super_context.context sctx |> Context.ocaml in
           ocaml.version
         in
         Staged.unstage
@@ -476,7 +476,7 @@ module Crawl = struct
           in
           let* pp_map =
             let+ version =
-              let+ ocaml = Super_context.context sctx |> Context.ocaml in
+              let* ocaml = Super_context.context sctx |> Context.ocaml in
               ocaml.version
             in
             Staged.unstage

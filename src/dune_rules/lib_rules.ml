@@ -53,9 +53,10 @@ let build_lib
       | None -> foreign_archives
     in
     let* ocaml = Context.ocaml ctx in
+    let* lib_config = ocaml.lib_config in
     let map_cclibs =
       (* https://github.com/ocaml/dune/issues/119 *)
-      match ocaml.lib_config.ccomp_type with
+      match lib_config.ccomp_type with
       | Msvc -> msvc_hack_cclibs
       | Other _ -> Fun.id
     in
@@ -113,7 +114,7 @@ let build_lib
              ; Deps
                  (Foreign.Objects.build_paths
                     lib.buildable.extra_objects
-                    ~ext_obj:ocaml.lib_config.ext_obj
+                    ~ext_obj:lib_config.ext_obj
                     ~dir)
              ]))
 ;;
@@ -163,7 +164,7 @@ let ocamlmklib
   =
   let ctx = Super_context.context sctx in
   let* ocaml = Context.ocaml ctx in
-  let { Lib_config.ext_lib; ext_dll; _ } = ocaml.lib_config in
+  let* ({ Lib_config.ext_lib; ext_dll; _ } as lib_config) = ocaml.lib_config in
   let static_target =
     Foreign.Archive.Name.lib_file archive_name ~dir ~ext_lib ~mode:stubs_mode
   in
@@ -171,7 +172,7 @@ let ocamlmklib
     Action_builder.map c_library_flags ~f:(fun cclibs ->
       (* https://github.com/ocaml/dune/issues/119 *)
       let cclibs =
-        match ocaml.lib_config.ccomp_type with
+        match lib_config.ccomp_type with
         | Msvc -> msvc_hack_cclibs cclibs
         | Other _ -> cclibs
       in
@@ -306,12 +307,11 @@ let build_stubs lib ~cctx ~dir ~expander ~requires ~dir_contents ~vlib_stubs_o_f
     let lib_name = Lib_name.Local.to_string (snd lib.name) in
     let archive_name = Foreign.Archive.Name.stubs lib_name in
     let modes = Compilation_context.modes cctx in
+    let* ocaml_config = (Compilation_context.ocaml cctx).ocaml_config in
     let build_targets_together =
       modes.ocaml.native
       && modes.ocaml.byte
-      && Dynlink_supported.get_ocaml_config
-           lib.dynlink
-           (Compilation_context.ocaml cctx).ocaml_config
+      && Dynlink_supported.get_ocaml_config lib.dynlink ocaml_config
     in
     let* standard =
       let+ project = Dune_load.find_project ~dir in
@@ -369,8 +369,9 @@ let build_stubs lib ~cctx ~dir ~expander ~requires ~dir_contents ~vlib_stubs_o_f
 let build_shared lib ~native_archives ~sctx ~dir ~flags =
   let ctx = Super_context.context sctx in
   let* ocaml = Context.ocaml ctx in
+  let* lib_config = ocaml.lib_config in
   Memo.Result.iter ocaml.ocamlopt ~f:(fun ocamlopt ->
-    let ext_lib = ocaml.lib_config.ext_lib in
+    let ext_lib = lib_config.ext_lib in
     let src =
       let ext = Mode.compiled_lib_ext Native in
       Path.build (Library.archive lib ~dir ~ext)
@@ -429,7 +430,7 @@ let setup_build_archives (lib : Library.t) ~top_sorted_modules ~cctx ~expander ~
   let js_of_ocaml = Js_of_ocaml.In_context.make ~dir lib.buildable.js_of_ocaml in
   let sctx = Compilation_context.super_context cctx in
   let ocaml = Compilation_context.ocaml cctx in
-  let { Lib_config.ext_obj; natdynlink_supported; _ } = ocaml.lib_config in
+  let* { Lib_config.ext_obj; natdynlink_supported; _ } = ocaml.lib_config in
   let open Memo.O in
   let* () =
     Modules.With_vlib.exit_module modules
@@ -515,8 +516,8 @@ let cctx (lib : Library.t) ~sctx ~source_modules ~dir ~expander ~scope ~compile_
   let modules = Vimpl.impl_modules vimpl modules in
   let requires_compile = Lib.Compile.direct_requires compile_info in
   let requires_link = Lib.Compile.requires_link compile_info in
-  let modes =
-    let { Lib_config.has_native; _ } = ocaml.lib_config in
+  let* modes =
+    let+ { Lib_config.has_native; _ } = ocaml.lib_config in
     Mode_conf.Lib.Set.eval_detailed lib.modes ~has_native
   in
   let package = Library.package lib in
@@ -573,7 +574,7 @@ let library_rules
   let* requires_compile = Compilation_context.requires_compile cctx in
   let ocaml = Compilation_context.ocaml cctx in
   let* requires_hidden = Compilation_context.requires_hidden cctx in
-  let stdlib_dir = ocaml.lib_config.stdlib_dir in
+  let* { Lib_config.stdlib_dir; _ } = ocaml.lib_config in
   let top_sorted_modules =
     let impl_only = Modules.With_vlib.impl_only modules in
     Dep_graph.top_closed_implementations
@@ -585,10 +586,11 @@ let library_rules
   in
   let* expander = Super_context.expander sctx ~dir in
   let* () = Check_rules.add_cycle_check sctx ~dir top_sorted_modules in
+  let* lib_config = ocaml.lib_config in
   let* () = gen_wrapped_compat_modules lib cctx
   and* () = Module_compilation.build_all cctx
   and* lib_info =
-    let lib_config = ocaml.lib_config in
+    let lib_config = lib_config in
     let info =
       Library.to_lib_info
         lib

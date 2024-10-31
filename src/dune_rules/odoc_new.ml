@@ -1183,7 +1183,8 @@ let fallback_artifacts
   | Some index ->
     let+ mods =
       let* ocaml = Context.ocaml ctx in
-      let stdlib_dir = ocaml.lib_config.Lib_config.stdlib_dir in
+      let* lib_config = ocaml.lib_config in
+      let stdlib_dir = lib_config.Lib_config.stdlib_dir in
       let cmti_path =
         match location with
         | Absolute d -> d

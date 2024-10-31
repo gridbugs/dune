@@ -11,7 +11,7 @@ val rules
   -> dir:Path.Build.t
   -> sandbox:Sandbox_config.t option
   -> unit:Path.t
-  -> Action.Full.t Action_builder.With_targets.t * t Action_builder.t
+  -> (Action.Full.t Action_builder.With_targets.t * t Action_builder.t) Memo.t
 
 (** For testing only *)
 val parse : string -> t

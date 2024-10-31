@@ -324,10 +324,11 @@ module Script = struct
     generated_dune_file |> Path.build |> Path.parent |> Option.iter ~f:Path.mkdir_p;
     let* context = Context.DB.get context in
     let* ocaml = Context.ocaml context in
+    let* ocaml_config = ocaml.ocaml_config in
     let* () =
       Jbuild_plugin.create_plugin_wrapper
         (Context.name context)
-        ocaml.ocaml_config
+        ocaml_config
         ~exec_dir:(Path.source eval.dir)
         ~plugin:(In_source_dir file)
         ~wrapper

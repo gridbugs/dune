@@ -49,7 +49,7 @@ let make_js_name ~js_ext ~output m =
 
 let modules_in_obj_dir ~sctx ~scope ~preprocess modules =
   let* version =
-    let+ ocaml = Context.ocaml (Super_context.context sctx) in
+    let* ocaml = Context.ocaml (Super_context.context sctx) in
     ocaml.version
   and* preprocess =
     Resolve.Memo.read_memo
@@ -327,7 +327,8 @@ let setup_emit_cmj_rules
     let* () = Module_compilation.build_all cctx in
     let* requires_compile = Compilation_context.requires_compile cctx in
     let* requires_hidden = Compilation_context.requires_hidden cctx in
-    let stdlib_dir = (Compilation_context.ocaml cctx).lib_config.stdlib_dir in
+    let* lib_config = (Compilation_context.ocaml cctx).lib_config in
+    let stdlib_dir = lib_config.stdlib_dir in
     let+ () =
       let emit_and_libs_deps =
         let target_dir = Path.Build.relative dir mel.target in

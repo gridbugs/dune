@@ -487,7 +487,7 @@ let create =
       let* context = Context.DB.get context in
       let* paths = Context.findlib_paths context
       and* lib_config =
-        let+ ocaml = Context.ocaml context in
+        let* ocaml = Context.ocaml context in
         ocaml.lib_config
       in
       DB.create ~paths ~lib_config)

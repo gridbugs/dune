@@ -40,8 +40,8 @@ module Linkage = struct
 
   let native_or_custom (ocaml : Ocaml_toolchain.t) =
     match ocaml.ocamlopt with
-    | Error _ -> custom ocaml.version
-    | Ok _ -> native
+    | Error _ -> Memo.map ocaml.version ~f:custom
+    | Ok _ -> Memo.return native
   ;;
 
   let js = { mode = Byte; ext = Js_of_ocaml.Ext.exe; flags = [] }
@@ -63,8 +63,9 @@ module Linkage = struct
     ~loc
     (m : Executables.Link_mode.t)
     =
+    let open Memo.O in
     match m with
-    | Other { mode = Byte; kind = Js } -> js
+    | Other { mode = Byte; kind = Js } -> Memo.return js
     | _ ->
       let link_mode : Link_mode.t =
         match m with
@@ -85,43 +86,46 @@ module Linkage = struct
              then Native
              else Byte_with_stubs_statically_linked_in)
       in
-      let ext =
-        let lib_config = ocaml.lib_config in
+      let* ext =
+        let+ lib_config = ocaml.lib_config in
         Executables.Link_mode.extension
           m
           ~loc
           ~ext_obj:lib_config.ext_obj
           ~ext_dll:lib_config.ext_dll
       in
-      let flags =
+      let* version = ocaml.version in
+      let+ flags =
         match m with
-        | Byte_complete -> [ Ocaml.Version.custom_or_output_complete_exe ocaml.version ]
+        | Byte_complete ->
+          Memo.return [ Ocaml.Version.custom_or_output_complete_exe version ]
         | Other { kind; _ } ->
           (match kind with
-           | C -> c_flags
-           | Js -> []
+           | C -> Memo.return c_flags
+           | Js -> Memo.return []
            | Exe ->
-             (match link_mode with
-              | Byte_with_stubs_statically_linked_in ->
-                [ Ocaml.Version.custom_or_output_complete_exe ocaml.version ]
-              | _ -> [])
-           | Object -> o_flags
+             Memo.return
+               (match link_mode with
+                | Byte_with_stubs_statically_linked_in ->
+                  [ Ocaml.Version.custom_or_output_complete_exe version ]
+                | _ -> [])
+           | Object -> Memo.return o_flags
            | Plugin ->
-             (match link_mode with
-              | Native -> cmxs_flags
-              | _ -> cma_flags)
+             Memo.return
+               (match link_mode with
+                | Native -> cmxs_flags
+                | _ -> cma_flags)
            | Shared_object ->
+             let+ ocaml_config = ocaml.ocaml_config in
              let so_flags =
-               let os_type = Ocaml_config.os_type ocaml.ocaml_config in
+               let os_type = Ocaml_config.os_type ocaml_config in
                if os_type = Win32 then so_flags_windows else so_flags_unix
              in
              (match link_mode with
               | Native ->
                 (* The compiler doesn't pass these flags in native mode. This
                    looks like a bug in the compiler. *)
-                let native_c_libraries =
-                  Ocaml_config.native_c_libraries ocaml.ocaml_config
-                in
+                let native_c_libraries = Ocaml_config.native_c_libraries ocaml_config in
                 List.concat_map native_c_libraries ~f:(fun flag -> [ "-cclib"; flag ])
                 @ so_flags
               | Byte | Byte_for_jsoo | Byte_with_stubs_statically_linked_in -> so_flags))
@@ -159,7 +163,9 @@ let link_exe
     let prefix =
       Cm_files.top_sorted_objects_and_cms cm_files ~mode |> Action_builder.dyn_paths_unit
     in
-    let+ fdo_linker_script_flags = Fdo.Linker_script.flags fdo_linker_script in
+    let* fdo_linker_script_flags = Fdo.Linker_script.flags fdo_linker_script in
+    let ocaml = Compilation_context.ocaml cctx in
+    let+ lib_config = ocaml.lib_config in
     let open Action_builder.With_targets.O in
     (* NB. Below we take care to pass [link_args] last on the command-line for
        the following reason: [link_args] contains the list of foreign libraries
@@ -181,7 +187,6 @@ let link_exe
 
        In each case, we could then pass the argument in dependency order, which
        would provide a better fix for this issue. *)
-    let ocaml = Compilation_context.ocaml cctx in
     Action_builder.with_no_targets prefix
     >>> Command.run
           ~dir:(Path.build (Context.build_dir ctx))
@@ -198,7 +203,7 @@ let link_exe
                  ; Lib_flags.Lib_and_module.L.link_flags
                      sctx
                      to_link
-                     ~lib_config:ocaml.lib_config
+                     ~lib_config
                      ~mode:linkage.mode
                  ])
           ; Deps o_files
@@ -291,15 +296,11 @@ let link_many
           (Compilation_context.dep_graphs cctx).impl
           [ main ]
       in
-      let cm_files =
+      let* cm_files =
         let ocaml = Compilation_context.ocaml cctx in
+        let+ lib_config = ocaml.lib_config in
         let obj_dir = Compilation_context.obj_dir cctx in
-        Cm_files.make
-          ~obj_dir
-          ~modules
-          ~top_sorted_modules
-          ~ext_obj:ocaml.lib_config.ext_obj
-          ()
+        Cm_files.make ~obj_dir ~modules ~top_sorted_modules ~ext_obj:lib_config.ext_obj ()
       in
       let+ () =
         Memo.parallel_iter linkages ~f:(fun linkage ->

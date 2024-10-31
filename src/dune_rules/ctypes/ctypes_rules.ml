@@ -179,25 +179,30 @@ let build_c_program
   let ocaml = Context.ocaml ctx in
   let exe =
     let open Action_builder.O in
-    let* ocaml = Action_builder.of_memo ocaml in
-    Ocaml_config.c_compiler ocaml.ocaml_config
+    let* ocaml_config =
+      Action_builder.of_memo
+        (Memo.bind ocaml ~f:(fun (ocaml : Ocaml_toolchain.t) -> ocaml.ocaml_config))
+    in
+    Ocaml_config.c_compiler ocaml_config
     |> Super_context.resolve_program ~loc:None ~dir sctx
   in
   let project = Scope.project scope in
   let with_user_and_std_flags =
     let base_flags =
       let open Action_builder.O in
-      let+ ocaml = Action_builder.of_memo ocaml in
+      let+ ocaml_config =
+        Action_builder.of_memo
+          (Memo.bind ocaml ~f:(fun (ocaml : Ocaml_toolchain.t) -> ocaml.ocaml_config))
+      in
       let use_standard_flags = Dune_project.use_standard_c_and_cxx_flags project in
-      let cfg = ocaml.ocaml_config in
       let fdo_flags = Command.Args.As (Fdo.c_flags ctx) in
       match use_standard_flags with
       | Some true -> fdo_flags
       | None | Some false ->
         (* In dune < 2.8 flags from ocamlc_config are always added *)
         S
-          [ As (Ocaml_config.ocamlc_cflags cfg)
-          ; As (Ocaml_config.ocamlc_cppflags cfg)
+          [ As (Ocaml_config.ocamlc_cflags ocaml_config)
+          ; As (Ocaml_config.ocamlc_cppflags ocaml_config)
           ; fdo_flags
           ]
     in
@@ -215,8 +220,11 @@ let build_c_program
   in
   let include_args =
     let open Action_builder.O in
-    let* ocaml = Action_builder.of_memo ocaml in
-    let ocaml_where = ocaml.lib_config.stdlib_dir in
+    let* lib_config =
+      Action_builder.of_memo
+        (Memo.bind ocaml ~f:(fun (ocaml : Ocaml_toolchain.t) -> ocaml.lib_config))
+    in
+    let ocaml_where = lib_config.stdlib_dir in
     (* XXX: need glob dependency *)
     let open Action_builder.O in
     let ctypes = Lib_name.of_string "ctypes" in
@@ -296,8 +304,8 @@ let gen_rules ~cctx ~(buildable : Buildable.t) ~loc ~scope ~dir ~sctx =
   let c_types_includer_module = ctypes.generated_types in
   let c_generated_types_module = Ctypes_field.c_generated_types_module ctypes in
   let open Memo.O in
-  let foreign_archives_deps =
-    let { Lib_config.ext_lib; ext_dll; _ } =
+  let* foreign_archives_deps =
+    let+ { Lib_config.ext_lib; ext_dll; _ } =
       (Compilation_context.ocaml cctx).lib_config
     in
     List.concat_map buildable.foreign_archives ~f:(fun (_loc, archive) ->

@@ -11,9 +11,10 @@ let configurator_v2 t = Path.Build.relative (dot_dune_dir t) "configurator.v2"
    "runtime dependencies" so we just do it eagerly. *)
 let gen_rules (ctx : Build_context.t) (ocaml : Ocaml_toolchain.t Action_builder.t) =
   let ocaml_and_ocaml_config_vars =
-    Action_builder.map ocaml ~f:(fun (ocaml : Ocaml_toolchain.t) ->
-      ( Path.to_absolute_filename ocaml.ocamlc
-      , Ocaml_config.Vars.to_list ocaml.ocaml_config_vars ))
+    Action_builder.bind ocaml ~f:(fun (ocaml : Ocaml_toolchain.t) ->
+      let open Action_builder.O in
+      let+ ocaml_config_vars = Action_builder.of_memo ocaml.ocaml_config_vars in
+      Path.to_absolute_filename ocaml.ocamlc, Ocaml_config.Vars.to_list ocaml_config_vars)
   in
   let* () =
     let fn = configurator_v1 ctx in

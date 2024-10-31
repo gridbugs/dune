@@ -58,10 +58,13 @@ type opaque =
   | Explicit of bool
   | Inherit_from_settings
 
-let eval_opaque (ocaml : Ocaml_toolchain.t) profile = function
-  | Explicit b -> b
+let eval_opaque (ocaml : Ocaml_toolchain.t) profile opaque =
+  match opaque with
+  | Explicit b -> Memo.return b
   | Inherit_from_settings ->
-    Profile.is_dev profile && Ocaml.Version.supports_opaque_for_mli ocaml.version
+    let open Memo.O in
+    let+ version = ocaml.version in
+    Profile.is_dev profile && Ocaml.Version.supports_opaque_for_mli version
 ;;
 
 type modules =
@@ -149,10 +152,11 @@ let create
   let project = Scope.project scope in
   let context = Super_context.context super_context in
   let* ocaml = Context.ocaml context in
+  let* version = ocaml.version in
   let direct_requires, hidden_requires =
     if Dune_project.implicit_transitive_deps project
     then Memo.Lazy.force requires_link, Resolve.Memo.return []
-    else if Version.supports_hidden_includes ocaml.version
+    else if Version.supports_hidden_includes version
             && Dune_project.dune_version project >= (3, 17)
     then (
       let requires_hidden =
@@ -175,7 +179,7 @@ let create
     in
     Option.value ~default modes |> Lib_mode.Map.map ~f:Option.is_some
   in
-  let opaque =
+  let* opaque =
     let profile = Context.profile context in
     eval_opaque ocaml profile opaque
   in
@@ -226,6 +230,7 @@ let alias_and_root_module_flags =
 ;;
 
 let for_alias_module t alias_module =
+  let open Memo.O in
   let keep_flags = Modules.With_vlib.is_stdlib_alias (modules t) alias_module in
   let flags =
     if keep_flags
@@ -237,11 +242,12 @@ let for_alias_module t alias_module =
       let profile = Super_context.context t.super_context |> Context.profile in
       Ocaml_flags.default ~dune_version ~profile)
   in
+  let+ version = t.ocaml.version in
   let sandbox =
     (* If the compiler reads the cmi for module alias even with [-w -49
        -no-alias-deps], we must sandbox the build of the alias module since the
        modules it references are built after. *)
-    if Ocaml.Version.always_reads_alias_cmi t.ocaml.version
+    if Ocaml.Version.always_reads_alias_cmi version
     then Sandbox_config.needs_sandboxing
     else Sandbox_config.no_special_requirements
   in
@@ -279,10 +285,12 @@ let for_root_module t root_module =
 ;;
 
 let for_module_generated_at_link_time cctx ~requires ~module_ =
+  let open Memo.O in
+  let+ version = cctx.ocaml.version in
   let opaque =
     (* Cmi's of link time generated modules are compiled with -opaque, hence
        their implementation must also be compiled with -opaque *)
-    Ocaml.Version.supports_opaque_for_mli cctx.ocaml.version
+    Ocaml.Version.supports_opaque_for_mli version
   in
   let direct_requires = requires in
   let hidden_requires = Resolve.Memo.return [] in

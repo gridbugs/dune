@@ -575,8 +575,12 @@ module Unprocessed = struct
     : Processed.pp_flag option Action_builder.t
     =
     let open Action_builder.O in
-    let* ocaml = Action_builder.of_memo (Context.ocaml ctx) in
-    match Preprocess.remove_future_syntax preprocess ~for_:Merlin ocaml.version with
+    let* version =
+      Action_builder.of_memo
+        (Context.ocaml ctx
+         |> Memo.bind ~f:(fun (ocaml : Ocaml_toolchain.t) -> ocaml.version))
+    in
+    match Preprocess.remove_future_syntax preprocess ~for_:Merlin version with
     | Action (loc, (action : Dune_lang.Action.t)) ->
       pp_flag_of_action ~expander ~loc ~action
     | No_preprocessing -> Action_builder.return None

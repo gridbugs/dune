@@ -254,7 +254,7 @@ end = struct
           let include_subdirs = Loc.none, Include_subdirs.No in
           let ctx = Super_context.context sctx in
           let lib_config =
-            let+ ocaml = Context.ocaml ctx in
+            let* ocaml = Context.ocaml ctx in
             ocaml.lib_config
           in
           let stanzas = Dune_file.stanzas d in
@@ -347,7 +347,7 @@ end = struct
           in
           let dirs = { Source_file_dir.dir; path_to_root = []; files } :: subdirs in
           let lib_config =
-            let+ ocaml = Context.ocaml ctx in
+            let* ocaml = Context.ocaml ctx in
             ocaml.lib_config
           in
           let ml =

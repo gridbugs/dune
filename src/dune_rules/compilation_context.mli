@@ -41,7 +41,7 @@ val create
   -> t Memo.t
 
 (** Return a compilation context suitable for compiling the alias module. *)
-val for_alias_module : t -> Module.t -> t
+val for_alias_module : t -> Module.t -> t Memo.t
 
 val super_context : t -> Super_context.t
 val context : t -> Context.t
@@ -76,7 +76,7 @@ val for_module_generated_at_link_time
   :  t
   -> requires:Lib.t list Resolve.Memo.t
   -> module_:Module.t
-  -> t
+  -> t Memo.t
 
 val for_plugin_executable : t -> embed_in_plugin_libraries:(Loc.t * Lib_name.t) list -> t
 val bin_annot : t -> bool

@@ -214,8 +214,12 @@ let cc t =
       let* cc = Action_builder.of_memo @@ Fdecl.get foreign_flags ~dir:t.dir in
       Foreign_language.Dict.get cc language
     and+ c_compiler =
-      let+ ocaml = Action_builder.of_memo @@ Context.ocaml t.context in
-      Ocaml_config.c_compiler ocaml.ocaml_config
+      let+ ocaml_config =
+        Action_builder.of_memo
+        @@ (Context.ocaml t.context
+            |> Memo.bind ~f:(fun (ocaml : Ocaml_toolchain.t) -> ocaml.ocaml_config))
+      in
+      Ocaml_config.c_compiler ocaml_config
     in
     strings (c_compiler :: cc)
   in
@@ -513,8 +517,9 @@ let expand_pform_var (context : Context.t) ~dir ~source (var : Pform.Var.t) =
   | Make -> Direct (Without (make (Dune_lang.Template.Pform.loc source) context))
   | Dev_null -> path Dev_null.path |> Memo.return |> static
   | Ocaml_stdlib_dir | Ext_obj | Ext_lib | Ext_dll | Ccomp_type ->
-    (let+ ocaml = ocaml in
-     lib_config_var var ocaml.lib_config)
+    (let* ocaml = ocaml in
+     let+ lib_config = ocaml.lib_config in
+     lib_config_var var lib_config)
     |> static
   | Ext_exe
   | Cpp
@@ -527,8 +532,9 @@ let expand_pform_var (context : Context.t) ~dir ~source (var : Pform.Var.t) =
   | Architecture
   | System
   | Model ->
-    (let+ ocaml = ocaml in
-     ocaml_config_var var ocaml.ocaml_config)
+    (let* ocaml = ocaml in
+     let+ ocaml_config = ocaml.ocaml_config in
+     ocaml_config_var var ocaml_config)
     |> static
   | Ignoring_promoted_rules ->
     string_of_bool !Clflags.ignore_promoted_rules |> string |> Memo.return |> static
@@ -566,7 +572,7 @@ let ocaml_config_macro source macro_invocation context =
   @@
   let open Memo.O in
   let+ ocaml_config =
-    let+ ocaml = Context.ocaml context in
+    let* ocaml = Context.ocaml context in
     ocaml.ocaml_config
   in
   match Ocaml_config.by_name ocaml_config s with

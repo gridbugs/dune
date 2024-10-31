@@ -9,11 +9,11 @@ type t =
   ; ocamldep : Action.Prog.t
   ; ocamlmklib : Action.Prog.t
   ; ocamlobjinfo : Action.Prog.t
-  ; ocaml_config : Ocaml_config.t
-  ; ocaml_config_vars : Ocaml_config.Vars.t
-  ; version : Ocaml.Version.t
+  ; ocaml_config : Ocaml_config.t Memo.t
+  ; ocaml_config_vars : Ocaml_config.Vars.t Memo.t
+  ; version : Ocaml.Version.t Memo.t
   ; builtins : Meta.Simplified.t Package.Name.Map.t Memo.t
-  ; lib_config : Lib_config.t
+  ; lib_config : Lib_config.t Memo.t
   }
 
 let make_builtins ~ocaml_config ~version =
@@ -23,27 +23,29 @@ let make_builtins ~ocaml_config ~version =
 ;;
 
 let make_ocaml_config ~env ~ocamlc =
-  let+ vars =
-    Process.run_capture_lines ~display:Quiet ~env Strict ocamlc [ "-config" ]
-    |> Memo.of_reproducible_fiber
-    >>| Ocaml_config.Vars.of_lines
-  in
-  match
-    match vars with
-    | Error msg -> Error (Ocaml_config.Origin.Ocamlc_config, msg)
-    | Ok vars ->
-      let open Result.O in
-      let+ ocfg = Ocaml_config.make vars in
-      vars, ocfg
-  with
-  | Ok x -> x
-  | Error (Ocaml_config.Origin.Makefile_config file, msg) ->
-    User_error.raise ~loc:(Loc.in_file file) [ Pp.text msg ]
-  | Error (Ocamlc_config, msg) ->
+  let ocamlc_config_parse_error msg =
     User_error.raise
       [ Pp.textf "Failed to parse the output of '%s -config':" (Path.to_string ocamlc)
       ; Pp.text msg
       ]
+  in
+  let vars =
+    Process.run_capture_lines ~display:Quiet ~env Strict ocamlc [ "-config" ]
+    |> Memo.of_reproducible_fiber
+    >>| Ocaml_config.Vars.of_lines
+    >>| function
+    | Ok x -> x
+    | Error msg -> ocamlc_config_parse_error msg
+  in
+  let ocfg =
+    Memo.map vars ~f:(fun vars ->
+      match Ocaml_config.make vars with
+      | Ok x -> x
+      | Error (Ocaml_config.Origin.Makefile_config file, msg) ->
+        User_error.raise ~loc:(Loc.in_file file) [ Pp.text msg ]
+      | Error (Ocamlc_config, msg) -> ocamlc_config_parse_error msg)
+  in
+  vars, ocfg
 ;;
 
 let compiler t (mode : Ocaml.Mode.t) =
@@ -85,14 +87,21 @@ let make name ~which ~env ~get_ocaml_tool =
       in
       Error (not_found ~hint prog)
   in
-  let* ocaml_config_vars, ocaml_config = make_ocaml_config ~env ~ocamlc in
+  let ocaml_config_vars, ocaml_config = make_ocaml_config ~env ~ocamlc in
   let* ocamlopt = get_ocaml_tool "ocamlopt"
   and* ocaml = get_ocaml_tool "ocaml"
   and* ocamldep = get_ocaml_tool "ocamldep"
   and* ocamlmklib = get_ocaml_tool "ocamlmklib"
   and* ocamlobjinfo = get_ocaml_tool "ocamlobjinfo" in
-  let version = Ocaml.Version.of_ocaml_config ocaml_config in
-  let builtins = make_builtins ~version ~ocaml_config in
+  let version =
+    let+ ocaml_config = ocaml_config in
+    Ocaml.Version.of_ocaml_config ocaml_config
+  in
+  let builtins =
+    let* version = version in
+    let+ ocaml_config = ocaml_config in
+    make_builtins ~version ~ocaml_config
+  in
   Memo.return
     { bin_dir = ocaml_bin
     ; ocaml
@@ -104,8 +113,12 @@ let make name ~which ~env ~get_ocaml_tool =
     ; ocaml_config
     ; ocaml_config_vars
     ; version
-    ; builtins = Memo.Lazy.force builtins
-    ; lib_config = Lib_config.create ocaml_config ~ocamlopt
+    ; builtins =
+        (let* builtins = builtins in
+         Memo.Lazy.force builtins)
+    ; lib_config =
+        (let+ ocaml_config = ocaml_config in
+         Lib_config.create ocaml_config ~ocamlopt)
     }
 ;;
 
@@ -146,18 +159,22 @@ let of_binaries ~path name env binaries =
 (* Seems wrong to support this at the level of the engine. This is easily
    implemented at the level of the rules and is noly needed for windows *)
 let register_response_file_support t =
-  if Ocaml.Version.supports_response_file t.version
+  let+ version = t.version in
+  if Ocaml.Version.supports_response_file version
   then (
     let set prog = Response_file.set ~prog (Zero_terminated_strings "-args0") in
     Result.iter t.ocaml ~f:set;
     set t.ocamlc;
     Result.iter t.ocamlopt ~f:set;
     Result.iter t.ocamldep ~f:set;
-    if Ocaml.Version.ocamlmklib_supports_response_file t.version
+    if Ocaml.Version.ocamlmklib_supports_response_file version
     then Result.iter ~f:set t.ocamlmklib)
 ;;
 
-let check_fdo_support { version; lib_config = { has_native; _ }; ocaml_config; _ } name =
+let check_fdo_support { version; lib_config; ocaml_config; _ } name =
+  let+ ocaml_config = ocaml_config
+  and+ lib_config = lib_config
+  and+ version = version in
   let version_string = Ocaml_config.version_string ocaml_config in
   let err () =
     User_error.raise
@@ -167,7 +184,7 @@ let check_fdo_support { version; lib_config = { has_native; _ }; ocaml_config; _
           version_string
       ]
   in
-  if not has_native then err ();
+  if not lib_config.has_native then err ();
   if Ocaml_config.is_dev_version ocaml_config
   then
     ( (* Allows fdo to be invoked with any dev version of the compiler. This is

@@ -10,11 +10,11 @@ type t =
   ; ocamldep : Action.Prog.t
   ; ocamlmklib : Action.Prog.t
   ; ocamlobjinfo : Action.Prog.t
-  ; ocaml_config : Ocaml_config.t
-  ; ocaml_config_vars : Ocaml_config.Vars.t
-  ; version : Ocaml.Version.t
+  ; ocaml_config : Ocaml_config.t Memo.t
+  ; ocaml_config_vars : Ocaml_config.Vars.t Memo.t
+  ; version : Ocaml.Version.t Memo.t
   ; builtins : Meta.Simplified.t Package.Name.Map.t Memo.t
-  ; lib_config : Lib_config.t
+  ; lib_config : Lib_config.t Memo.t
   }
 
 val of_env_with_findlib
@@ -39,5 +39,5 @@ val compiler : t -> Ocaml.Mode.t -> Action.Prog.t
 (** The best compilation mode for this context *)
 val best_mode : t -> Mode.t
 
-val check_fdo_support : t -> Context_name.t -> unit
-val register_response_file_support : t -> unit
+val check_fdo_support : t -> Context_name.t -> unit Memo.t
+val register_response_file_support : t -> unit Memo.t

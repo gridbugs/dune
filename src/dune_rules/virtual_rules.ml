@@ -12,7 +12,7 @@ let setup_copy_rules_for_impl ~sctx ~dir vimpl =
   in
   let open Memo.O in
   let* { Lib_config.has_native; ext_obj; _ } =
-    let+ ocaml = Context.ocaml ctx in
+    let* ocaml = Context.ocaml ctx in
     ocaml.lib_config
   in
   let { Lib_mode.Map.ocaml = { byte; native }; melange } =
@@ -109,10 +109,8 @@ let impl sctx ~(lib : Library.t) ~scope =
                  (Preprocess.Per_module.with_instrumentation
                     lib.buildable.preprocess
                     ~instrumentation_backend:(Lib.DB.instrumentation_backend db))
-             in
-             let pp_spec =
-               Staged.unstage (Pp_spec.pped_modules_map preprocess ocaml.version)
-             in
+             and* version = ocaml.version in
+             let pp_spec = Staged.unstage (Pp_spec.pped_modules_map preprocess version) in
              Dir_contents.ocaml dir_contents
              >>= Ml_sources.modules
                    ~libs:db
@@ -120,7 +118,8 @@ let impl sctx ~(lib : Library.t) ~scope =
              >>= Modules.map_user_written ~f:(fun m -> Memo.return (pp_spec m))
            in
            let+ foreign_objects =
-             let ext_obj = ocaml.lib_config.ext_obj in
+             let* lib_config = ocaml.lib_config in
+             let ext_obj = lib_config.ext_obj in
              let dir = Obj_dir.obj_dir (Lib.Local.obj_dir vlib) in
              let+ foreign_sources = Dir_contents.foreign_sources dir_contents in
              foreign_sources

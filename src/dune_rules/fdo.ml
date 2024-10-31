@@ -146,7 +146,7 @@ let opt_rule cctx m =
 ;;
 
 module Linker_script = struct
-  type t = Path.t Memo.t option
+  type t = Path.t option Memo.t
 
   let ocamlfdo_linker_script_flags = get_flags "OCAMLFDO_LINKER_SCRIPT_FLAGS"
 
@@ -191,23 +191,28 @@ module Linker_script = struct
   let create cctx name =
     let ctx = Compilation_context.context cctx in
     match Context.fdo_target_exe ctx with
-    | None -> None
+    | None -> Memo.return None
     | Some fdo_target_exe ->
-      if let ocaml = Compilation_context.ocaml cctx in
-         Path.equal name fdo_target_exe
-         && (Ocaml.Version.supports_function_sections ocaml.version
-             || Ocaml_config.is_dev_version ocaml.ocaml_config)
-      then Some (linker_script_rule cctx fdo_target_exe)
-      else None
+      let open Memo.O in
+      let ocaml = Compilation_context.ocaml cctx in
+      let* ocaml_config = ocaml.ocaml_config
+      and* version = ocaml.version in
+      if Path.equal name fdo_target_exe
+         && (Ocaml.Version.supports_function_sections version
+             || Ocaml_config.is_dev_version ocaml_config)
+      then
+        let+ path = linker_script_rule cctx fdo_target_exe in
+        Some path
+      else Memo.return None
   ;;
 
   let flags t =
     let open Memo.O in
     let open Command.Args in
-    match t with
-    | None -> Memo.return (As [])
+    let+ maybe_path = t in
+    match maybe_path with
+    | None -> As []
     | Some linker_script ->
-      let+ linker_script = linker_script in
       S [ A "-ccopt"; Concat ("", [ A "-Xlinker --script="; Dep linker_script ]) ]
   ;;
 end

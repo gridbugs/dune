@@ -171,13 +171,15 @@ include Sub_system.Register_end_point (struct
           ~package
       in
       let* linkages =
-        let+ jsoo_compilation_mode = Jsoo_rules.js_of_ocaml_compilation_mode sctx ~dir in
+        let* jsoo_compilation_mode = Jsoo_rules.js_of_ocaml_compilation_mode sctx ~dir in
         let ocaml = Compilation_context.ocaml cctx in
+        let* version = ocaml.version in
+        let+ native_or_custom = Exe.Linkage.native_or_custom ocaml in
         List.concat_map (Mode_conf.Set.to_list info.modes) ~f:(fun (mode : Mode_conf.t) ->
           match mode with
           | Native -> [ Exe.Linkage.native ]
-          | Best -> [ Exe.Linkage.native_or_custom ocaml ]
-          | Byte -> [ Exe.Linkage.custom_with_ext ~ext:".bc" ocaml.version ]
+          | Best -> [ native_or_custom ]
+          | Byte -> [ Exe.Linkage.custom_with_ext ~ext:".bc" version ]
           | Javascript ->
             (match jsoo_compilation_mode with
              | Js_of_ocaml.Compilation_mode.Whole_program ->

@@ -28,7 +28,7 @@ module Linkage : sig
   val custom : Ocaml.Version.t -> t
 
   (** [native] if supported, [custom] if not *)
-  val native_or_custom : Ocaml_toolchain.t -> t
+  val native_or_custom : Ocaml_toolchain.t -> t Memo.t
 
   (** Javascript compilation, extension [.bc.js] *)
   val js : t
@@ -42,7 +42,7 @@ module Linkage : sig
     -> dynamically_linked_foreign_archives:bool
     -> loc:Loc.t
     -> Executables.Link_mode.t
-    -> t
+    -> t Memo.t
 end
 
 type dep_graphs = { for_exes : Module.t list Action_builder.t list }
