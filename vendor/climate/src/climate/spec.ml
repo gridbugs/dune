@@ -15,6 +15,7 @@ module Named = struct
       ; desc : string option
       ; completion : untyped_completion_hint option
       ; hidden : bool
+      ; repeated : bool
       }
 
     let has_param t =
@@ -23,7 +24,7 @@ module Named = struct
       | `Yes_with_value_name _ -> true
     ;;
 
-    let flag names ~desc ~hidden =
+    let flag names ~desc ~hidden ~repeated =
       { names
       ; has_param = `No
       ; default_string = None
@@ -31,17 +32,8 @@ module Named = struct
       ; desc
       ; completion = None
       ; hidden
+      ; repeated
       }
-    ;;
-
-    let long_name { names; _ } =
-      List.find_opt (Nonempty_list.to_list names) ~f:Name.is_long
-    ;;
-
-    let choose_name_long_if_possible t =
-      match long_name t with
-      | Some name -> name
-      | None -> Nonempty_list.hd t.names
     ;;
 
     let to_completion_named_arg t =
@@ -50,12 +42,29 @@ module Named = struct
       ; hint = t.completion
       }
     ;;
+
+    let help_entry t =
+      if t.hidden
+      then None
+      else (
+        let value =
+          match t.has_param with
+          | `No -> None
+          | `Yes_with_value_name name -> Some { Help.Value.name; required = true }
+        in
+        let name = { Help.Named_args.names = t.names; value; repeated = t.repeated } in
+        Some { Help.name; desc = t.desc })
+    ;;
   end
 
   type t = { infos : Info.t list }
 
   let empty = { infos = [] }
   let is_empty { infos } = List.is_empty infos
+
+  let help_entries { infos } : Help.Named_args.t =
+    List.rev infos |> List.filter_map ~f:Info.help_entry
+  ;;
 
   let get_info_by_name { infos } name =
     List.find_opt infos ~f:(fun (info : Info.t) ->
@@ -86,38 +95,51 @@ module Named = struct
     | Some help_name -> Error (Spec_error.Name_reserved_for_help help_name)
   ;;
 
-  let all_required { infos } = List.filter infos ~f:(fun { Info.required; _ } -> required)
-
-  let all_optional { infos } =
-    List.filter infos ~f:(fun { Info.required; _ } -> not required)
-  ;;
-
   let to_completion_named_args { infos } = List.map infos ~f:Info.to_completion_named_arg
 end
 
 module Positional = struct
-  type all_above_inclusive =
-    { index : int
-    ; value_name : string
-    ; completion : untyped_completion_hint option
-    }
-
   type single_arg =
     { required : bool
     ; value_name : string
     ; completion : untyped_completion_hint option
+    ; desc : string option
+    }
+
+  type all_above_inclusive =
+    { index : int
+    ; arg : single_arg
     }
 
   (* Keeps track of which indices of positional argument have parsers registered *)
   type t =
     { all_above_inclusive : all_above_inclusive option
-    ; other_value_names_by_index : single_arg Int.Map.t
+    ; others_by_index : single_arg Int.Map.t
     }
 
-  let empty = { all_above_inclusive = None; other_value_names_by_index = Int.Map.empty }
+  let empty = { all_above_inclusive = None; others_by_index = Int.Map.empty }
 
-  let is_empty { all_above_inclusive; other_value_names_by_index } =
-    Option.is_none all_above_inclusive && Int.Map.is_empty other_value_names_by_index
+  let is_empty { all_above_inclusive; others_by_index } =
+    Option.is_none all_above_inclusive && Int.Map.is_empty others_by_index
+  ;;
+
+  let help_entry_of_single_arg { required; value_name; desc; _ }
+    : Help.Positional_args.entry
+    =
+    let name = { Help.Value.name = value_name; required } in
+    { Help.name; desc }
+  ;;
+
+  let help_entries { all_above_inclusive; others_by_index } =
+    let fixed =
+      Int.Map.to_list others_by_index
+      |> List.map ~f:snd
+      |> List.map ~f:help_entry_of_single_arg
+    in
+    let repeated =
+      Option.map all_above_inclusive ~f:(fun { arg; _ } -> help_entry_of_single_arg arg)
+    in
+    { Help.Positional_args.fixed; repeated }
   ;;
 
   let check_value_names index value_name1 value_name2 =
@@ -132,47 +154,48 @@ module Positional = struct
     match t.all_above_inclusive with
     | None -> t
     | Some all_above_inclusive ->
-      let other_value_names_by_index =
-        Int.Map.filter
-          t.other_value_names_by_index
-          ~f:(fun index { value_name; required; _ } ->
-            if index >= all_above_inclusive.index
-            then (
-              check_value_names index value_name all_above_inclusive.value_name;
-              if required
-              then
-                Error.spec_error (Conflicting_requiredness_for_positional_argument index);
-              false)
-            else true)
+      let others_by_index =
+        Int.Map.filter t.others_by_index ~f:(fun index { value_name; required; _ } ->
+          if index >= all_above_inclusive.index
+          then (
+            check_value_names index value_name all_above_inclusive.arg.value_name;
+            if required
+            then Error.spec_error (Conflicting_requiredness_for_positional_argument index);
+            false)
+          else true)
       in
-      { t with other_value_names_by_index }
+      { t with others_by_index }
   ;;
 
-  let add_index t index ~value_name ~required ~completion =
-    let other_value_names_by_index =
-      Int.Map.update t.other_value_names_by_index ~key:index ~f:(function
-        | None -> Some { value_name; required; completion }
+  let add_index t index ~value_name ~required ~completion ~desc =
+    let others_by_index =
+      Int.Map.update t.others_by_index ~key:index ~f:(function
+        | None -> Some { value_name; required; completion; desc }
         | Some x ->
           check_value_names index x.value_name value_name;
           if x.required <> required
           then Error.spec_error (Conflicting_requiredness_for_positional_argument index);
           Some x)
     in
-    trim_map { t with other_value_names_by_index }
+    trim_map { t with others_by_index }
   ;;
 
-  let add_all_above_inclusive t index ~value_name ~completion =
+  let add_all_above_inclusive t index ~value_name ~completion ~desc =
     match t.all_above_inclusive with
     | Some x when x.index < index ->
-      check_value_names index x.value_name value_name;
+      check_value_names index x.arg.value_name value_name;
       t
     | _ ->
-      trim_map { t with all_above_inclusive = Some { index; value_name; completion } }
+      trim_map
+        { t with
+          all_above_inclusive =
+            Some { index; arg = { required = false; value_name; completion; desc } }
+        }
   ;;
 
-  let add_all_below_exclusive t index ~value_name ~required ~completion =
+  let add_all_below_exclusive t index ~value_name ~required ~completion ~desc =
     Seq.init index Fun.id
-    |> Seq.fold_left (add_index ~value_name ~required ~completion) t
+    |> Seq.fold_left (add_index ~value_name ~required ~completion ~desc) t
     |> trim_map
   ;;
 
@@ -182,25 +205,22 @@ module Positional = struct
       | None, None -> None
       | Some a, None | None, Some a -> Some a
       | Some x, Some y ->
-        check_value_names (Int.max x.index y.index) x.value_name y.value_name;
+        check_value_names (Int.max x.index y.index) x.arg.value_name y.arg.value_name;
         let index = Int.min x.index y.index in
-        Some { index; value_name = x.value_name; completion = x.completion }
+        Some { index; arg = x.arg }
     in
-    let other_value_names_by_index =
-      Int.Map.merge
-        x.other_value_names_by_index
-        y.other_value_names_by_index
-        ~f:(fun index x y ->
-          match x, y with
-          | None, None -> None
-          | Some value_name, None | None, Some value_name -> Some value_name
-          | Some x, Some y ->
-            check_value_names index x.value_name y.value_name;
-            if x.required <> y.required
-            then Error.spec_error (Conflicting_requiredness_for_positional_argument index);
-            Some x)
+    let others_by_index =
+      Int.Map.merge x.others_by_index y.others_by_index ~f:(fun index x y ->
+        match x, y with
+        | None, None -> None
+        | Some value_name, None | None, Some value_name -> Some value_name
+        | Some x, Some y ->
+          check_value_names index x.value_name y.value_name;
+          if x.required <> y.required
+          then Error.spec_error (Conflicting_requiredness_for_positional_argument index);
+          Some x)
     in
-    trim_map { all_above_inclusive; other_value_names_by_index }
+    trim_map { all_above_inclusive; others_by_index }
   ;;
 
   let single_at_index i = add_index empty i
@@ -210,10 +230,8 @@ module Positional = struct
   (* Check that there are no gaps in the declared positional arguments (E.g.
      if the parser would interpret the argument at position 0 and 2 but not 1
      it's probably an error.) *)
-  let validate_no_gaps { all_above_inclusive; other_value_names_by_index } =
-    let other_indices =
-      Int.Map.to_seq other_value_names_by_index |> Seq.map fst |> Int.Set.of_seq
-    in
+  let validate_no_gaps { all_above_inclusive; others_by_index } =
+    let other_indices = Int.Map.to_seq others_by_index |> Seq.map fst |> Int.Set.of_seq in
     let set_to_validate =
       match all_above_inclusive with
       | Some { index; _ } -> Int.Set.add index other_indices
@@ -230,15 +248,15 @@ module Positional = struct
        | None -> Ok ())
   ;;
 
-  let to_completions ({ all_above_inclusive; other_value_names_by_index } as t) =
+  let to_completions ({ all_above_inclusive; others_by_index } as t) =
     if Result.is_error (validate_no_gaps t)
     then raise (Invalid_argument "positional argument spec has gaps");
     let finite_args =
-      Int.Map.bindings other_value_names_by_index
+      Int.Map.bindings others_by_index
       |> List.map ~f:(fun (_, { completion; _ }) -> completion)
     in
     let repeated_arg =
-      Option.map all_above_inclusive ~f:(fun { completion; _ } ->
+      Option.map all_above_inclusive ~f:(fun { arg = { completion; _ }; _ } ->
         match completion with
         | None -> `No_hint
         | Some hint -> `Hint hint)
@@ -246,17 +264,10 @@ module Positional = struct
     { Completion_spec.Positional_args_hints.finite_args; repeated_arg }
   ;;
 
-  let arg_count { all_above_inclusive; other_value_names_by_index } =
+  let arg_count { all_above_inclusive; others_by_index } =
     match all_above_inclusive with
     | Some _ -> `Unlimited
-    | None -> `Limited (Int.Map.cardinal other_value_names_by_index)
-  ;;
-
-  let all_required_value_names { other_value_names_by_index; _ } =
-    Int.Map.to_seq other_value_names_by_index
-    |> Seq.filter_map (fun (_, { required; value_name; _ }) ->
-      if required then Some value_name else None)
-    |> List.of_seq
+    | None -> `Limited (Int.Map.cardinal others_by_index)
   ;;
 end
 
@@ -284,52 +295,14 @@ let create_named info =
   { named; positional = Positional.empty }
 ;;
 
-let create_flag names ~desc ~hidden = create_named (Named.Info.flag names ~desc ~hidden)
-
-let usage ppf { named; positional } =
-  let named_optional = Named.all_optional named in
-  if not (List.is_empty named_optional) then Format.pp_print_string ppf " [OPTIONS]";
-  let named_required = Named.all_required named in
-  List.iter named_required ~f:(fun (info : Named.Info.t) ->
-    if not info.hidden
-    then (
-      match info.has_param with
-      | `No ->
-        (* there should be no required arguments with no parameters *)
-        ()
-      | `Yes_with_value_name value_name ->
-        let name = Named.Info.choose_name_long_if_possible info in
-        if Name.is_long name
-        then Format.fprintf ppf " %s=<%s>" (Name.to_string_with_dashes name) value_name
-        else Format.fprintf ppf " %s<%s>" (Name.to_string_with_dashes name) value_name));
-  Positional.all_required_value_names positional
-  |> List.iter ~f:(fun value_name -> Format.fprintf ppf " <%s>" value_name);
-  match positional.all_above_inclusive with
-  | Some { value_name; _ } -> Format.fprintf ppf " [%s]..." value_name
-  | None -> ()
+let create_flag names ~desc ~hidden ~repeated =
+  create_named (Named.Info.flag names ~desc ~hidden ~repeated)
 ;;
 
-let named_help ppf { named; _ } =
-  if not (List.is_empty named.infos) then Format.pp_print_string ppf "Options:";
-  Format.pp_print_newline ppf ();
-  List.iter (List.rev named.infos) ~f:(fun (info : Named.Info.t) ->
-    if not info.hidden
-    then (
-      Format.pp_print_string ppf " ";
-      Format.pp_print_list
-        ~pp_sep:(fun ppf () -> Format.pp_print_string ppf ", ")
-        (fun ppf name -> Format.pp_print_string ppf (Name.to_string_with_dashes name))
-        ppf
-        (Nonempty_list.to_list info.names);
-      (match info.has_param with
-       | `No -> ()
-       | `Yes_with_value_name value_name ->
-         Format.pp_print_string ppf " ";
-         Format.fprintf ppf "<%s>" value_name);
-      (match info.desc with
-       | None -> ()
-       | Some desc -> Format.fprintf ppf "   %s" desc);
-      Format.pp_print_newline ppf ()))
+let help_sections { named; positional } =
+  { Help.Arg_sections.named_args = Named.help_entries named
+  ; positional_args = Positional.help_entries positional
+  }
 ;;
 
 let to_completion_parser_spec { named; positional } =

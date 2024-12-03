@@ -22,6 +22,7 @@ module Named : sig
       (** Completion hint for this argument *)
       ; hidden : bool (** If true, then this argument doesn't show up
                           in help messages. *)
+      ; repeated : bool (** If true, this argument can be passed multiple times *)
       }
 
     (** Returns true iff the argument accepts a value *)
@@ -50,6 +51,8 @@ module Positional : sig
       spec. *)
   val arg_count : t -> [ `Limited of int | `Unlimited ]
 
+  val is_empty : t -> bool
+
   (** Create a spec with a single positional argument at a given
       index. *)
   val single_at_index
@@ -57,6 +60,7 @@ module Positional : sig
     -> value_name:string
     -> required:bool
     -> completion:untyped_completion_hint option
+    -> desc:string option
     -> t
 
   (** Create a spec with an unlimited number of positional arguments
@@ -66,6 +70,7 @@ module Positional : sig
     :  int
     -> value_name:string
     -> completion:untyped_completion_hint option
+    -> desc:string option
     -> t
 
   (** Create a spec with positional arguments from index 0 up to but
@@ -75,6 +80,7 @@ module Positional : sig
     -> value_name:string
     -> required:bool
     -> completion:untyped_completion_hint option
+    -> desc:string option
     -> t
 end
 
@@ -102,10 +108,14 @@ val create_named : Named.Info.t -> t
 
 (** Helper for creating a spec with a single named argument which
     doesn't take a value (ie. a flag). *)
-val create_flag : Name.t Nonempty_list.t -> desc:string option -> hidden:bool -> t
+val create_flag
+  :  Name.t Nonempty_list.t
+  -> desc:string option
+  -> hidden:bool
+  -> repeated:bool
+  -> t
 
-val usage : Format.formatter -> t -> unit
-val named_help : Format.formatter -> t -> unit
+val help_sections : t -> Help.Arg_sections.t
 
 val to_completion_parser_spec
   :  t
