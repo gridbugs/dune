@@ -39,7 +39,13 @@ let pkg_dir (pkg : Dune_pkg.Lock_dir.Pkg.t) =
   Path.Outside_build_dir.relative (base_dir ()) dir_name
 ;;
 
-let installation_prefix ~pkg_dir = Path.Outside_build_dir.relative pkg_dir "target"
+let installation_prefix ~pkg_dir =
+  Path.Outside_build_dir.relative pkg_dir "target"
+  |> Path.Outside_build_dir.to_string
+  |> String.split_on_char ~sep:'\\'
+  |> String.concat ~sep:"/"
+  |> Path.Outside_build_dir.of_string
+;;
 
 let is_compiler_and_toolchains_enabled name =
   match Config.get Compile_time.toolchains with
@@ -89,25 +95,37 @@ let ocaml context env ~bin_dir =
 *)
 let installation_prefix_within_tmp_install_dir ~installation_prefix:prefix tmp_install_dir
   =
-  let target_without_root_prefix =
-    (* Remove the root directory prefix from the target directory so
-       it can be used to create a path relative to the temporary
-       install dir. *)
-    match
-      String.drop_prefix
-        (Path.Outside_build_dir.to_string prefix)
-        ~prefix:(Path.External.to_string Path.External.root)
-    with
-    | Some x -> x
-    | None ->
-      Code_error.raise
-        "Expected prefix to start with root"
-        [ "prefix", Path.Outside_build_dir.to_dyn prefix
-        ; "root", Path.External.to_dyn Path.External.root
-        ; "tmp_install_dir", Path.to_dyn tmp_install_dir
-        ]
-  in
-  Path.relative tmp_install_dir target_without_root_prefix
+  if Sys.win32
+  then
+    (* XXX(steve): it would be better to concatenate the paths here without
+       using the low-level Filename module directly but [Path.relative] treats
+       the C: as a filesystem root, but in this instance we're trying to refer
+       to a directory literally named "C:" (or possibly a different drive
+       name). *)
+    Path.of_string
+      (Filename.concat
+         (Path.to_string tmp_install_dir)
+         (Path.Outside_build_dir.to_string prefix))
+  else (
+    let target_without_root_prefix =
+      (* Remove the root directory prefix from the target directory so
+         it can be used to create a path relative to the temporary
+         install dir. *)
+      match
+        String.drop_prefix
+          (Path.Outside_build_dir.to_string prefix)
+          ~prefix:(Path.External.to_string Path.External.root)
+      with
+      | Some x -> x
+      | None ->
+        Code_error.raise
+          "Expected prefix to start with root"
+          [ "prefix", Path.Outside_build_dir.to_dyn prefix
+          ; "root", Path.External.to_dyn Path.External.root
+          ; "tmp_install_dir", Path.to_dyn tmp_install_dir
+          ]
+    in
+    Path.relative tmp_install_dir target_without_root_prefix)
 ;;
 
 let modify_install_action (action : Dune_lang.Action.t) ~installation_prefix ~suffix =
@@ -183,6 +201,19 @@ let touch_config_cache =
     ]
 ;;
 
+let rec modify_build_action_windows (action : Dune_lang.Action.t) =
+  match action with
+  | Progn actions ->
+    Dune_lang.Action.Progn (List.map actions ~f:modify_build_action_windows)
+  | Run (Literal prog :: _ as command) ->
+    (match String_with_vars.text_only prog with
+     | Some "./configure" ->
+       (* work around the issue where ./configure doesn't work on windows due to the lack of file extension *)
+       Run (Literal (String_with_vars.make_text Loc.none "bash") :: command)
+     | _ -> action)
+  | other -> other
+;;
+
 let modify_build_action ~prefix action =
   let+ installed = Fs_memo.dir_exists prefix in
   if installed
@@ -190,6 +221,8 @@ let modify_build_action ~prefix action =
     (* If the toolchain is already installed, just create config.cache file.
        TODO(steve): Move this check to action execution time *)
     touch_config_cache
+  else if Sys.win32
+  then modify_build_action_windows action
   else action
 ;;
 
