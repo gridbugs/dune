@@ -632,11 +632,9 @@ let make vars =
       Sys.file_exists (Filename.concat standard_library lib)
     in
     let file =
-      (* TODO(steve): this is windows-specific and obviously wrong but works
-         around an issue where the produced path is invalid (I think!) *)
-      String.concat ~sep:"\\" [ standard_library; "Makefile.config" ]
-      |> Path.External.of_string
-      |> Path.external_
+      (* TODO This can give a code error if not an external path *)
+      let stdlib = Path.external_ (Path.External.of_string standard_library) in
+      Path.relative stdlib "Makefile.config"
     in
     let vars = Vars.load_makefile_config file in
     let module Getters =
