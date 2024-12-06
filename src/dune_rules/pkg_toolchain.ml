@@ -140,7 +140,11 @@ let modify_install_action (action : Dune_lang.Action.t) ~installation_prefix ~su
          Dune_lang.Action.Run
            [ Literal make
            ; Literal install
-           ; Slang.text (sprintf "DESTDIR=%s" (Path.to_string tmp_install_dir))
+             (* XXX(steve): the trailing slash in DESTDIR is necessary on windows
+                to prevent the drive name (e.g. "C:") from being concatonated to
+                the temporary directory, rather than made into a subdirectory of
+                it. *)
+           ; Slang.text (sprintf "DESTDIR=%s/" (Path.to_string tmp_install_dir))
            ]
        in
        let prefix = Path.outside_build_dir installation_prefix in
@@ -205,11 +209,16 @@ let rec modify_build_action_windows (action : Dune_lang.Action.t) =
   match action with
   | Progn actions ->
     Dune_lang.Action.Progn (List.map actions ~f:modify_build_action_windows)
-  | Run (Literal prog :: _ as command) ->
+  | Run (Literal prog :: args) ->
     (match String_with_vars.text_only prog with
      | Some "./configure" ->
        (* work around the issue where ./configure doesn't work on windows due to the lack of file extension *)
-       Run (Literal (String_with_vars.make_text Loc.none "bash") :: command)
+       Run
+         (Literal (String_with_vars.make_text Loc.none "bash")
+          :: Literal (String_with_vars.make_text Loc.none "./configure")
+             (* XXX(steve): this is a hack that's specific to the mingw toolchain *)
+          :: Literal (String_with_vars.make_text Loc.none "--build=x86_64-w64-mingw32")
+          :: args)
      | _ -> action)
   | other -> other
 ;;
