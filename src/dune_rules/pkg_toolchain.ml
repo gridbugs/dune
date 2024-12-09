@@ -231,7 +231,11 @@ let rec modify_build_action_windows (action : Dune_lang.Action.t) =
        Run
          (Literal (String_with_vars.make_text Loc.none "bash")
           :: Literal (String_with_vars.make_text Loc.none "./configure")
-             (* XXX(steve): this is a hack that's specific to the mingw toolchain *)
+             (* XXX(steve): this is a hack that's specific to the mingw
+                toolchain. If we don't pass "--build=..." to ./configure then
+                the build fails with "undefined reference to `WinMain'" . The
+                argument to --build should depend on which C compiler the
+                user has chosen and not hard-coded to be mingw. *)
           :: Literal (String_with_vars.make_text Loc.none "--build=x86_64-w64-mingw32")
              (* XXX(steve): this might also be mingw-specific, as it's [round] function apparently does not work *)
           :: Literal
