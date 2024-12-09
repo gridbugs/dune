@@ -41,6 +41,14 @@ let pkg_dir (pkg : Dune_pkg.Lock_dir.Pkg.t) =
 
 let installation_prefix ~pkg_dir =
   Path.Outside_build_dir.relative pkg_dir "target"
+  (* XXX(steve): replace the backslashes with slashes in the installation
+     prefix. On windows the path will naturally uses backslashes as the path
+     delimiter however this particular path ends up embedded in some generated
+     C code where the backslashes will be treated as escape sequences. Most
+     windows tools are happy with either backslashes or slashes as path
+     delimiters, so replacing them here probably won't cause any problems. It
+     would be better if this logic was built into stdune's [Path] module so we
+     don't need to convert the path to and from a string here. *)
   |> Path.Outside_build_dir.to_string
   |> String.split_on_char ~sep:'\\'
   |> String.concat ~sep:"/"
@@ -98,10 +106,11 @@ let installation_prefix_within_tmp_install_dir ~installation_prefix:prefix tmp_i
   if Sys.win32
   then
     (* XXX(steve): it would be better to concatenate the paths here without
-       using the low-level Filename module directly but [Path.relative] treats
-       the C: as a filesystem root, but in this instance we're trying to refer
-       to a directory literally named "C:" (or possibly a different drive
-       name). *)
+       using the low-level [Filename] module directly. We can't use the
+       higher-level [Path] module here as [Path.relative] treats the directory
+       name C: as a filesystem root. That is normally correct, however in this
+       instance we're trying to refer to a directory literally named "C:" (or
+       possibly a different drive name). *)
     Path.of_string
       (Filename.concat
          (Path.to_string tmp_install_dir)
@@ -205,6 +214,12 @@ let touch_config_cache =
     ]
 ;;
 
+(* The build commands in the compiler's opam metadata work unmodified with dune
+   toolchains on unixes however on windows this is not the case. This function
+   rewrites the compiler's build action on windows so that it can be
+   installed with dune toolchains. Note that none of these changes are
+   specific to installing with dune toolchains, and are instead required to
+   build the compiler in a non-opam environment. *)
 let rec modify_build_action_windows (action : Dune_lang.Action.t) =
   match action with
   | Progn actions ->

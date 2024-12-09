@@ -5,7 +5,9 @@ let _BUILD_PATH_PREFIX_MAP = "BUILD_PATH_PREFIX_MAP"
 let extend_build_path_prefix_map env how map =
   let new_rules = Build_path_prefix_map.encode_map map in
   (* XXX(steve): this was causing problems building ocaml-base-compiler on
-     windows, so skip it for now *)
+     windows, so skip it for now. When the BUILD_PATH_PREFIX_MAP variable is
+     set on windows, the compiler fails to compile with the following error:
+     "Fatal error: Invalid value for the environment variable BUILD_PATH_PREFIX_MAP: invalid key/value pair "C", no '=' separator" *)
   let _ =
     Env.update env ~var:_BUILD_PATH_PREFIX_MAP ~f:(function
       | None -> Some new_rules
