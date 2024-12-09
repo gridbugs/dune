@@ -218,6 +218,9 @@ let rec modify_build_action_windows (action : Dune_lang.Action.t) =
           :: Literal (String_with_vars.make_text Loc.none "./configure")
              (* XXX(steve): this is a hack that's specific to the mingw toolchain *)
           :: Literal (String_with_vars.make_text Loc.none "--build=x86_64-w64-mingw32")
+             (* XXX(steve): this might also be mingw-specific, as it's [round] function apparently does not work *)
+          :: Literal
+               (String_with_vars.make_text Loc.none "--enable-imprecise-c99-float-ops")
           :: args)
      | _ -> action)
   | other -> other
