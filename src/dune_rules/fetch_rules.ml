@@ -134,7 +134,7 @@ let action ~url ~checksum ~target ~kind = A.action { Spec.target; checksum; url;
 
 let extract_checksums_and_urls (lockdir : Dune_pkg.Lock_dir.t) =
   Package.Name.Map.fold
-    lockdir.packages
+    lockdir.solution.packages
     ~init:(Checksum.Map.empty, Dune_digest.Map.empty)
     ~f:(fun package acc ->
       let sources =

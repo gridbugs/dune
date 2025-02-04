@@ -39,19 +39,35 @@ module Repositories : sig
   type t
 end
 
+module Solution : sig
+  type t = private
+    { packages : Pkg.t Package_name.Map.t
+    (** It's guaranteed that this map will contain an entry for all dependencies
+        of all packages in this map. That is, the set of packages is closed under
+        the "depends on" relationship between packages. *)
+    ; expanded_solver_variable_bindings : Solver_stats.Expanded_variable_bindings.t
+    (** Stores the solver variables that were evaluated while solving
+        dependencies. Can be used to determine if a lockdir is compatible
+        with a particular system. *)
+    }
+
+  (** [transitive_dependency_closure t names] returns the set of package names
+      making up the transitive closure of dependencies of the set [names], or
+      [Error (`Missing_packages missing_packages)] if if any element of [names]
+      is not found in the lockdir. [missing_packages] is a subset of [names]
+      not present in the lockdir. *)
+  val transitive_dependency_closure
+    :  t
+    -> Package_name.Set.t
+    -> (Package_name.Set.t, [ `Missing_packages of Package_name.Set.t ]) result
+end
+
 type t = private
   { version : Syntax.Version.t
   ; dependency_hash : (Loc.t * Local_package.Dependency_hash.t) option
-  ; packages : Pkg.t Package_name.Map.t
-  (** It's guaranteed that this map will contain an entry for all dependencies
-      of all packages in this map. That is, the set of packages is closed under
-      the "depends on" relationship between packages. *)
   ; ocaml : (Loc.t * Package_name.t) option
   ; repos : Repositories.t
-  ; expanded_solver_variable_bindings : Solver_stats.Expanded_variable_bindings.t
-  (** Stores the solver variables that were evaluated while solving
-      dependencies. Can be used to determine if a lockdir is compatible
-      with a particular system. *)
+  ; solution : Solution.t
   }
 
 val remove_locs : t -> t
@@ -108,16 +124,6 @@ module Make_load (Io : sig
   val load : Path.Source.t -> (t, User_message.t) result Io.t
   val load_exn : Path.Source.t -> t Io.t
 end
-
-(** [transitive_dependency_closure t names] returns the set of package names
-    making up the transitive closure of dependencies of the set [names], or
-    [Error (`Missing_packages missing_packages)] if if any element of [names]
-    is not found in the lockdir. [missing_packages] is a subset of [names]
-    not present in the lockdir. *)
-val transitive_dependency_closure
-  :  t
-  -> Package_name.Set.t
-  -> (Package_name.Set.t, [ `Missing_packages of Package_name.Set.t ]) result
 
 (** Attempt to download and compute checksums for packages that have source
     archive urls but no checksum. *)

@@ -23,3 +23,8 @@ val with_defaults : t
 val pp : t -> 'a Pp.t
 val unset_multi : t -> Package_variable_name.Set.t -> t
 val to_env : t -> OpamFilter.env
+
+(** Envs that occur commonly in the wild that dune will solve for when
+    generating portable lockfiles (lockfiles will only be portable between
+    systems listed here. *)
+val popular_envs : t list

@@ -139,7 +139,7 @@ let get_with_path ctx =
      | None -> ()
      | Some workspace_lock_dir ->
        Solver_stats.Expanded_variable_bindings.validate_against_solver_env
-         lock_dir.expanded_solver_variable_bindings
+         lock_dir.solution.expanded_solver_variable_bindings
          (workspace_lock_dir.solver_env |> Option.value ~default:Solver_env.empty));
     Ok (path, lock_dir)
 ;;

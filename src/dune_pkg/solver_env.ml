@@ -86,3 +86,14 @@ let to_env t variable =
     in
     get t variable_name |> Option.map ~f:Variable_value.to_opam_variable_contents
 ;;
+
+let popular_envs =
+  let arch = [ "x86_64"; "arm64" ] in
+  let os = [ "linux"; "macos"; "windows" ] in
+  List.concat_map arch ~f:(fun arch ->
+    List.map os ~f:(fun os ->
+      let t = with_defaults in
+      let t = set t Package_variable_name.arch (Variable_value.string arch) in
+      let t = set t Package_variable_name.os (Variable_value.string os) in
+      t))
+;;

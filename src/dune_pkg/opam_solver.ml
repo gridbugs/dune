@@ -1663,7 +1663,12 @@ let opam_package_to_lock_file_pkg
     | [] -> action
     | env_update -> Action.Withenv (env_update, action)
   in
-  let get_solver_var variable_name =
+  let get_solver_var opam_package variable_name =
+    print_endline
+      (sprintf
+         "%s reading %s"
+         (OpamPackage.to_string opam_package)
+         (Package_variable_name.to_string variable_name));
     Solver_stats.Updater.expand_variable stats_updater variable_name;
     Solver_env.get solver_env variable_name
   in
@@ -1696,7 +1701,7 @@ let opam_package_to_lock_file_pkg
       in
       let build_step =
         opam_commands_to_actions
-          get_solver_var
+          (get_solver_var opam_package)
           loc
           opam_package
           (OpamFile.OPAM.build opam_file)
@@ -1716,7 +1721,7 @@ let opam_package_to_lock_file_pkg
   in
   let install_command =
     OpamFile.OPAM.install opam_file
-    |> opam_commands_to_actions get_solver_var loc opam_package
+    |> opam_commands_to_actions (get_solver_var opam_package) loc opam_package
     |> make_action
     |> Option.map ~f:build_env
   in

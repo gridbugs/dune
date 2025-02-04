@@ -17,7 +17,9 @@ module Show_lock = struct
         [ Pp.hovbox
           @@ Pp.textf "Contents of %s:" (Path.Source.to_string_maybe_quoted lock_dir_path)
         ; Pkg_common.pp_packages
-            (Package_name.Map.to_list_map ~f:(fun _ pkg -> pkg) lock_dir.packages)
+            (Package_name.Map.to_list_map
+               ~f:(fun _ pkg -> pkg)
+               lock_dir.solution.packages)
         ]
       |> Pp.vbox)
   ;;

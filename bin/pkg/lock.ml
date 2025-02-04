@@ -147,7 +147,7 @@ let solve_lock_dir
            (Pp.textf
               "Solution for %s:"
               (Path.Source.to_string_maybe_quoted lock_dir_path))
-         :: (match Package_name.Map.values lock_dir.packages with
+         :: (match Package_name.Map.values lock_dir.solution.packages with
              | [] ->
                Pp.tag User_message.Style.Warning @@ Pp.text "(no dependencies to lock)"
              | packages -> pp_packages packages)

@@ -294,26 +294,90 @@ module Repositories = struct
   ;;
 end
 
+module Solution = struct
+  type t =
+    { packages : Pkg.t Package_name.Map.t
+    ; expanded_solver_variable_bindings : Solver_stats.Expanded_variable_bindings.t
+    }
+
+  let equal { packages; expanded_solver_variable_bindings } t =
+    Package_name.Map.equal packages t.packages ~equal:Pkg.equal
+    && Solver_stats.Expanded_variable_bindings.equal
+         expanded_solver_variable_bindings
+         t.expanded_solver_variable_bindings
+  ;;
+
+  let to_dyn { packages; expanded_solver_variable_bindings } =
+    Dyn.record
+      [ "packages", Package_name.Map.to_dyn Pkg.to_dyn packages
+      ; ( "expanded_solver_variable_bindings"
+        , Solver_stats.Expanded_variable_bindings.to_dyn expanded_solver_variable_bindings
+        )
+      ]
+  ;;
+
+  let transitive_dependency_closure t start =
+    let missing_packages =
+      let all_packages_in_lock_dir = Package_name.Set.of_keys t.packages in
+      Package_name.Set.diff start all_packages_in_lock_dir
+    in
+    match Package_name.Set.is_empty missing_packages with
+    | false -> Error (`Missing_packages missing_packages)
+    | true ->
+      let to_visit = Queue.create () in
+      let push_set = Package_name.Set.iter ~f:(Queue.push to_visit) in
+      push_set start;
+      let rec loop seen =
+        match Queue.pop to_visit with
+        | None -> seen
+        | Some node ->
+          let unseen_deps =
+            (* Note that the call to find_exn won't raise because [t] guarantees
+               that its map of dependencies is closed under "depends on". *)
+            Package_name.Set.(
+              diff
+                (of_list_map (Package_name.Map.find_exn t.packages node).depends ~f:snd)
+                seen)
+          in
+          push_set unseen_deps;
+          loop (Package_name.Set.union seen unseen_deps)
+      in
+      Ok (loop start)
+  ;;
+
+  let compute_missing_checksums t ~pinned_packages =
+    let open Fiber.O in
+    let+ packages =
+      Package_name.Map.to_list t.packages
+      |> Fiber.parallel_map ~f:(fun (name, pkg) ->
+        let pinned = Package_name.Set.mem pinned_packages name in
+        let+ pkg = Pkg.compute_missing_checksum pkg ~pinned in
+        name, pkg)
+      >>| Package_name.Map.of_list_exn
+    in
+    { t with packages }
+  ;;
+end
+
 type t =
   { version : Syntax.Version.t
   ; dependency_hash : (Loc.t * Local_package.Dependency_hash.t) option
-  ; packages : Pkg.t Package_name.Map.t
   ; ocaml : (Loc.t * Package_name.t) option
   ; repos : Repositories.t
-  ; expanded_solver_variable_bindings : Solver_stats.Expanded_variable_bindings.t
+  ; solution : Solution.t
   }
 
 let remove_locs t =
   { t with
-    packages = Package_name.Map.map t.packages ~f:Pkg.remove_locs
+    solution =
+      { t.solution with
+        Solution.packages = Package_name.Map.map t.solution.packages ~f:Pkg.remove_locs
+      }
   ; ocaml = Option.map t.ocaml ~f:(fun (_, ocaml) -> Loc.none, ocaml)
   }
 ;;
 
-let equal
-  { version; dependency_hash; packages; ocaml; repos; expanded_solver_variable_bindings }
-  t
-  =
+let equal { version; dependency_hash; ocaml; repos; solution } t =
   Syntax.Version.equal version t.version
   && Option.equal
        (Tuple.T2.equal Loc.equal Local_package.Dependency_hash.equal)
@@ -321,26 +385,19 @@ let equal
        t.dependency_hash
   && Option.equal (Tuple.T2.equal Loc.equal Package_name.equal) ocaml t.ocaml
   && Repositories.equal repos t.repos
-  && Package_name.Map.equal packages t.packages ~equal:Pkg.equal
-  && Solver_stats.Expanded_variable_bindings.equal
-       expanded_solver_variable_bindings
-       t.expanded_solver_variable_bindings
+  && Solution.equal solution t.solution
 ;;
 
-let to_dyn
-  { version; dependency_hash; packages; ocaml; repos; expanded_solver_variable_bindings }
-  =
+let to_dyn { version; dependency_hash; ocaml; repos; solution } =
   Dyn.record
     [ "version", Syntax.Version.to_dyn version
     ; ( "dependency_hash"
       , Dyn.option
           (Tuple.T2.to_dyn Loc.to_dyn_hum Local_package.Dependency_hash.to_dyn)
           dependency_hash )
-    ; "packages", Package_name.Map.to_dyn Pkg.to_dyn packages
     ; "ocaml", Dyn.option (Tuple.T2.to_dyn Loc.to_dyn_hum Package_name.to_dyn) ocaml
     ; "repos", Repositories.to_dyn repos
-    ; ( "expanded_solver_variable_bindings"
-      , Solver_stats.Expanded_variable_bindings.to_dyn expanded_solver_variable_bindings )
+    ; "solution", Solution.to_dyn solution
     ]
 ;;
 
@@ -378,6 +435,7 @@ let create_latest_version
   ~repos
   ~expanded_solver_variable_bindings
   =
+  let solution = { Solution.packages; expanded_solver_variable_bindings } in
   (match validate_packages packages with
    | Ok () -> ()
    | Error (`Missing_dependencies missing_dependencies) ->
@@ -403,13 +461,7 @@ let create_latest_version
       let complete = Int.equal (List.length repos) (List.length used) in
       complete, Some used
   in
-  { version
-  ; dependency_hash
-  ; packages
-  ; ocaml
-  ; repos = { complete; used }
-  ; expanded_solver_variable_bindings
-  }
+  { version; dependency_hash; ocaml; repos = { complete; used }; solution }
 ;;
 
 let dev_tools_path = Path.Source.(relative root "dev-tools.locks")
@@ -427,15 +479,7 @@ module Metadata = Dune_sexp.Versioned_file.Make (Unit)
 
 let () = Metadata.Lang.register Dune_lang.Pkg.syntax ()
 
-let encode_metadata
-  { version
-  ; dependency_hash
-  ; ocaml
-  ; repos
-  ; packages = _
-  ; expanded_solver_variable_bindings
-  }
-  =
+let encode_metadata { version; dependency_hash; ocaml; repos; solution } =
   let open Encoder in
   let base =
     list
@@ -460,14 +504,15 @@ let encode_metadata
      | Some ocaml -> [ list sexp [ string "ocaml"; Package_name.encode (snd ocaml) ] ])
   @ [ list sexp (string "repositories" :: Repositories.encode repos) ]
   @
-  if Solver_stats.Expanded_variable_bindings.is_empty expanded_solver_variable_bindings
+  if Solver_stats.Expanded_variable_bindings.is_empty
+       solution.expanded_solver_variable_bindings
   then []
   else
     [ list
         sexp
         (string "expanded_solver_variable_bindings"
          :: Solver_stats.Expanded_variable_bindings.encode
-              expanded_solver_variable_bindings)
+              solution.expanded_solver_variable_bindings)
     ]
 ;;
 
@@ -475,7 +520,7 @@ let encode t =
   let open Encoder in
   let metadata = encode_metadata t in
   let packages =
-    Package_name.Map.values t.packages
+    Package_name.Map.values t.solution.packages
     |> List.map ~f:(fun pkg -> Dune_sexp.List (Pkg.encode ~include_name:true pkg))
   in
   metadata @ [ List (string "packages" :: packages) ]
@@ -510,7 +555,7 @@ end
 
 let file_contents_by_path t =
   (metadata_filename, encode_metadata t)
-  :: (Package_name.Map.to_list t.packages
+  :: (Package_name.Map.to_list t.solution.packages
       |> List.map ~f:(fun (name, pkg) ->
         Package_filename.of_package_name name, Pkg.encode ~include_name:false pkg))
 ;;
@@ -722,14 +767,8 @@ struct
           package.info.name, package)
         |> Package_name.Map.of_list_exn
       in
-      Ok
-        { version
-        ; dependency_hash
-        ; packages
-        ; ocaml
-        ; repos
-        ; expanded_solver_variable_bindings
-        })
+      let solution = { Solution.packages; expanded_solver_variable_bindings } in
+      Ok { version; dependency_hash; ocaml; repos; solution })
     else
       Error
         (User_error.make
@@ -886,13 +925,8 @@ struct
     in
     check_packages packages ~lock_dir_path
     |> Result.map ~f:(fun () ->
-      { version
-      ; dependency_hash
-      ; packages
-      ; ocaml
-      ; repos
-      ; expanded_solver_variable_bindings
-      })
+      let solution = { Solution.packages; expanded_solver_variable_bindings } in
+      { version; dependency_hash; ocaml; repos; solution })
   ;;
 
   let load lock_dir_path =
@@ -933,44 +967,8 @@ module Load_immediate = Make_load (struct
 let read_disk = Load_immediate.load
 let read_disk_exn = Load_immediate.load_exn
 
-let transitive_dependency_closure t start =
-  let missing_packages =
-    let all_packages_in_lock_dir = Package_name.Set.of_keys t.packages in
-    Package_name.Set.diff start all_packages_in_lock_dir
-  in
-  match Package_name.Set.is_empty missing_packages with
-  | false -> Error (`Missing_packages missing_packages)
-  | true ->
-    let to_visit = Queue.create () in
-    let push_set = Package_name.Set.iter ~f:(Queue.push to_visit) in
-    push_set start;
-    let rec loop seen =
-      match Queue.pop to_visit with
-      | None -> seen
-      | Some node ->
-        let unseen_deps =
-          (* Note that the call to find_exn won't raise because [t] guarantees
-             that its map of dependencies is closed under "depends on". *)
-          Package_name.Set.(
-            diff
-              (of_list_map (Package_name.Map.find_exn t.packages node).depends ~f:snd)
-              seen)
-        in
-        push_set unseen_deps;
-        loop (Package_name.Set.union seen unseen_deps)
-    in
-    Ok (loop start)
-;;
-
 let compute_missing_checksums t ~pinned_packages =
   let open Fiber.O in
-  let+ packages =
-    Package_name.Map.to_list t.packages
-    |> Fiber.parallel_map ~f:(fun (name, pkg) ->
-      let pinned = Package_name.Set.mem pinned_packages name in
-      let+ pkg = Pkg.compute_missing_checksum pkg ~pinned in
-      name, pkg)
-    >>| Package_name.Map.of_list_exn
-  in
-  { t with packages }
+  let+ solution = Solution.compute_missing_checksums t.solution ~pinned_packages in
+  { t with solution }
 ;;

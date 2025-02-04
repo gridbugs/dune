@@ -115,8 +115,8 @@ let locked_ocaml_compiler_version () =
             ~sep:Pp.space
             [ Pp.text "Try running"; User_message.command "dune pkg lock" ]
         ]
-  | Ok { packages; _ } ->
-    (match Package_name.Map.find packages compiler_package_name with
+  | Ok { solution; _ } ->
+    (match Package_name.Map.find solution.packages compiler_package_name with
      | None ->
        User_error.raise
          [ Pp.textf
@@ -164,11 +164,11 @@ let lockdir_status dev_tool =
   let dev_tool_lock_dir = Lock_dir.dev_tool_lock_dir_path dev_tool in
   match Lock_dir.read_disk dev_tool_lock_dir with
   | Error _ -> Memo.return `No_lockdir
-  | Ok { packages; _ } ->
+  | Ok { solution; _ } ->
     (match Dune_pkg.Dev_tool.needs_to_build_with_same_compiler_as_project dev_tool with
      | false -> Memo.return `Lockdir_ok
      | true ->
-       (match Package_name.Map.find packages compiler_package_name with
+       (match Package_name.Map.find solution.packages compiler_package_name with
         | None -> Memo.return `No_compiler_lockfile_in_lockdir
         | Some { info; _ } ->
           let+ ocaml_compiler_version = locked_ocaml_compiler_version () in

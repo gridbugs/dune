@@ -1055,7 +1055,7 @@ module DB = struct
   let get package_universe =
     let dune = Package.Name.Set.singleton (Package.Name.of_string "dune") in
     let+ all = Package_universe.lock_dir package_universe in
-    { all = all.packages; system_provided = dune }
+    { all = all.solution.packages; system_provided = dune }
   ;;
 end
 
@@ -1760,7 +1760,7 @@ let setup_pkg_install_alias =
     let open Action_builder.O in
     let project_deps : Package_universe.t = Project_dependencies ctx_name in
     let* lock_dir = Action_builder.of_memo (Package_universe.lock_dir project_deps) in
-    Dune_lang.Package_name.Map.keys lock_dir.packages
+    Dune_lang.Package_name.Map.keys lock_dir.solution.packages
     |> List.map ~f:(fun pkg ->
       Paths.make ~relative:Path.Build.relative project_deps pkg
       |> Paths.target_dir
