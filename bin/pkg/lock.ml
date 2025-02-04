@@ -66,6 +66,12 @@ let resolve_project_pins project_pins =
   Pin_stanza.resolve project_pins ~scan_project
 ;;
 
+let lock_dir_type =
+  match Dune_rules.Setup.single_lockfile with
+  | `Enabled -> `File
+  | `Disabled -> `Dir
+;;
+
 let solve_lock_dir
   workspace
   ~local_packages
@@ -149,7 +155,8 @@ let solve_lock_dir
     in
     progress_state := None;
     let+ lock_dir = Lock_dir.compute_missing_checksums ~pinned_packages lock_dir in
-    Ok (Lock_dir.Write_disk.prepare ~lock_dir_path lock_dir, summary_message)
+    Ok
+      (Lock_dir.Write_disk.prepare ~lock_dir_path ~lock_dir_type lock_dir, summary_message)
 ;;
 
 let solve

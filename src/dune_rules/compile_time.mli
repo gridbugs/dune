@@ -20,3 +20,6 @@ val pkg_build_progress : Config.Toggle.t Config.t
 
 (** Enable or disable using package management to install dev tools. *)
 val lock_dev_tools : Config.Toggle.t Config.t
+
+(** Use a single lockfile rather than a lockdir *)
+val single_lockfile : Config.Toggle.t Config.t

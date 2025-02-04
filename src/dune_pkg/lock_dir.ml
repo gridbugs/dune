@@ -159,6 +159,7 @@ module Pkg = struct
   ;;
 
   module Fields = struct
+    let name = "name"
     let version = "version"
     let install = "install"
     let depends = "depends"
@@ -173,7 +174,8 @@ module Pkg = struct
     let open Decoder in
     enter
     @@ fields
-    @@ let+ version = field Fields.version Package_version.decode
+    @@ let+ name_parsed = field_o Fields.name Package_name.decode
+       and+ version = field Fields.version Package_version.decode
        and+ install_command = field_o Fields.install Action.decode_pkg
        and+ build_command = Build_command.decode
        and+ depends =
@@ -189,7 +191,15 @@ module Pkg = struct
            ~default:[]
            (repeat (pair (plain_string Path.Local.parse_string_exn) Source.decode))
        in
-       fun ~lock_dir name ->
+       fun ~lock_dir ~name_external ->
+         let name =
+           match name_parsed, name_external with
+           | Some parsed, Some external_ ->
+             assert (Package_name.equal parsed external_);
+             external_
+           | Some name, None | None, Some name -> name
+           | None, None -> Code_error.raise "Package is missing name" []
+         in
          let info =
            let make_source f =
              Path.source lock_dir
@@ -214,26 +224,28 @@ module Pkg = struct
   ;;
 
   let encode
+    ~include_name
     { build_command
     ; install_command
     ; depends
     ; depexts
-    ; info = { Pkg_info.name = _; extra_sources; version; dev; source }
+    ; info = { Pkg_info.name; extra_sources; version; dev; source }
     ; exported_env
     }
     =
     let open Encoder in
     record_fields
-      [ field Fields.version Package_version.encode version
-      ; field_o Fields.install Action.encode install_command
-      ; Build_command.encode build_command
-      ; field_l Fields.depends Package_name.encode (List.map depends ~f:snd)
-      ; field_l Fields.depexts string depexts
-      ; field_o Fields.source Source.encode source
-      ; field_b Fields.dev dev
-      ; field_l Fields.exported_env Action.Env_update.encode exported_env
-      ; field_l Fields.extra_sources encode_extra_source extra_sources
-      ]
+      ((if include_name then [ field Fields.name Package_name.encode name ] else [])
+       @ [ field Fields.version Package_version.encode version
+         ; field_o Fields.install Action.encode install_command
+         ; Build_command.encode build_command
+         ; field_l Fields.depends Package_name.encode (List.map depends ~f:snd)
+         ; field_l Fields.depexts string depexts
+         ; field_o Fields.source Source.encode source
+         ; field_b Fields.dev dev
+         ; field_l Fields.exported_env Action.Env_update.encode exported_env
+         ; field_l Fields.extra_sources encode_extra_source extra_sources
+         ])
   ;;
 end
 
@@ -459,7 +471,17 @@ let encode_metadata
     ]
 ;;
 
-let decode_metadata =
+let encode t =
+  let open Encoder in
+  let metadata = encode_metadata t in
+  let packages =
+    Package_name.Map.values t.packages
+    |> List.map ~f:(fun pkg -> Dune_sexp.List (Pkg.encode ~include_name:true pkg))
+  in
+  metadata @ [ List (string "packages" :: packages) ]
+;;
+
+let decode =
   let open Decoder in
   fields
     (let+ ocaml = field_o "ocaml" (located Package_name.decode)
@@ -471,8 +493,8 @@ let decode_metadata =
          "expanded_solver_variable_bindings"
          ~default:Solver_stats.Expanded_variable_bindings.empty
          Solver_stats.Expanded_variable_bindings.decode
-     in
-     ocaml, dependency_hash, repos, expanded_solver_variable_bindings)
+     and+ packages = field "packages" ~default:[] (repeat Pkg.decode) in
+     ocaml, dependency_hash, repos, expanded_solver_variable_bindings, packages)
 ;;
 
 module Package_filename = struct
@@ -490,7 +512,7 @@ let file_contents_by_path t =
   (metadata_filename, encode_metadata t)
   :: (Package_name.Map.to_list t.packages
       |> List.map ~f:(fun (name, pkg) ->
-        Package_filename.of_package_name name, Pkg.encode pkg))
+        Package_filename.of_package_name name, Pkg.encode ~include_name:false pkg))
 ;;
 
 module Write_disk = struct
@@ -505,7 +527,7 @@ module Write_disk = struct
       let metadata_path = Path.relative path metadata_filename in
       (match Path.stat metadata_path with
        | Ok { st_kind = S_REG; _ } ->
-         (match Metadata.load metadata_path ~f:(Fun.const decode_metadata) with
+         (match Metadata.load metadata_path ~f:(Fun.const decode) with
           | Ok _unused -> Ok `Is_existing_lock_dir
           | Error exn -> Error (`Failed_to_parse_metadata (metadata_path, exn)))
        | _ -> Error `No_metadata_file)
@@ -580,7 +602,7 @@ module Write_disk = struct
 
   type t = unit -> unit
 
-  let prepare ~lock_dir_path:lock_dir_path_src lock_dir =
+  let prepare_dir ~lock_dir_path:lock_dir_path_src lock_dir =
     let lock_dir_hidden_src =
       (* The original lockdir path with the lockdir renamed to begin with a ".". *)
       let hidden_basename = sprintf ".%s" (Path.Source.basename lock_dir_path_src) in
@@ -622,6 +644,25 @@ module Write_disk = struct
         [ Pp.textf "Temporary directory can't be created by deriving the lock dir path" ]
   ;;
 
+  let prepare_file path lock_dir =
+    let csts =
+      encode lock_dir
+      |> List.map ~f:(fun sexp ->
+        Dune_sexp.Ast.add_loc ~loc:Loc.none sexp |> Dune_sexp.Cst.concrete)
+    in
+    (* TODO the version should be chosen based on the version of the lock
+       directory we're outputting *)
+    let pp = Dune_lang.Format.pp_top_sexps ~version:(3, 11) csts in
+    let file_contents = Format.asprintf "%a" Pp.to_fmt pp in
+    fun () -> Io.write_file (Path.source path) file_contents
+  ;;
+
+  let prepare ~lock_dir_path ~lock_dir_type lock_dir =
+    match lock_dir_type with
+    | `Dir -> prepare_dir ~lock_dir_path lock_dir
+    | `File -> prepare_file lock_dir_path lock_dir
+  ;;
+
   let commit t = t ()
 end
 
@@ -634,6 +675,72 @@ module Make_load (Io : sig
     val stats_kind : Path.Source.t -> (File_kind.t, Unix_error.Detailed.t) result t
   end) =
 struct
+  let load_file path =
+    let open Io.O in
+    let+ ( syntax
+         , version
+         , dependency_hash
+         , ocaml
+         , repos
+         , expanded_solver_variable_bindings
+         , packages )
+      =
+      Io.with_lexbuf_from_file path ~f:(fun lexbuf ->
+        Metadata.parse_contents
+          lexbuf
+          ~f:(fun { Metadata.Lang.Instance.syntax; data = (); version } ->
+            let decode =
+              let env = Pform.Env.pkg version in
+              String_with_vars.set_decoding_env env decode
+              |> Syntax.set Dune_lang.Pkg.syntax (Active version)
+              |> Syntax.set
+                   Dune_lang.Stanza.syntax
+                   (Active Dune_lang.Stanza.latest_version)
+            in
+            let open Decoder in
+            let+ ( ocaml
+                 , dependency_hash
+                 , repos
+                 , expanded_solver_variable_bindings
+                 , packages )
+              =
+              decode
+            in
+            ( syntax
+            , version
+            , dependency_hash
+            , ocaml
+            , repos
+            , expanded_solver_variable_bindings
+            , packages )))
+    in
+    if String.equal (Syntax.name syntax) (Syntax.name Dune_lang.Pkg.syntax)
+    then (
+      let packages =
+        List.map packages ~f:(fun make_package ->
+          let package : Pkg.t = make_package ~lock_dir:path ~name_external:None in
+          package.info.name, package)
+        |> Package_name.Map.of_list_exn
+      in
+      Ok
+        { version
+        ; dependency_hash
+        ; packages
+        ; ocaml
+        ; repos
+        ; expanded_solver_variable_bindings
+        })
+    else
+      Error
+        (User_error.make
+           [ Pp.textf
+               "In %s, expected language to be %s, but found %s"
+               (Path.Source.to_string path)
+               (Syntax.name Dune_lang.Pkg.syntax)
+               (Syntax.name syntax)
+           ])
+  ;;
+
   let load_metadata metadata_file_path =
     let open Io.O in
     let+ syntax, version, dependency_hash, ocaml, repos, expanded_solver_variable_bindings
@@ -643,8 +750,13 @@ struct
           lexbuf
           ~f:(fun { Metadata.Lang.Instance.syntax; data = (); version } ->
             let open Decoder in
-            let+ ocaml, dependency_hash, repos, expanded_solver_variable_bindings =
-              decode_metadata
+            let+ ( ocaml
+                 , dependency_hash
+                 , repos
+                 , expanded_solver_variable_bindings
+                 , _packages )
+              =
+              decode
             in
             ( syntax
             , version
@@ -683,14 +795,15 @@ struct
     in
     (Decoder.parse parser Univ_map.empty (List (Loc.none, sexp)))
       ~lock_dir:lock_dir_path
-      package_name
+      ~name_external:(Some package_name)
   ;;
 
   let check_path lock_dir_path =
     let open Io.O in
     Io.stats_kind lock_dir_path
     >>| function
-    | Ok S_DIR -> Ok ()
+    | Ok S_DIR -> Ok `Dir
+    | Ok S_REG -> Ok `File
     | Error (Unix.ENOENT, _, _) ->
       Error
         (User_error.make
@@ -713,7 +826,10 @@ struct
     | _ ->
       Error
         (User_error.make
-           [ Pp.textf "%s is not a directory." (Path.Source.to_string lock_dir_path) ])
+           [ Pp.textf
+               "%s is not a directory or regular file."
+               (Path.Source.to_string lock_dir_path)
+           ])
   ;;
 
   let check_packages packages ~lock_dir_path =
@@ -750,37 +866,42 @@ struct
            ])
   ;;
 
+  let load_dir lock_dir_path =
+    let open Io.O in
+    let* version, dependency_hash, ocaml, repos, expanded_solver_variable_bindings =
+      load_metadata (Path.Source.relative lock_dir_path metadata_filename)
+    in
+    let+ packages =
+      Io.readdir_with_kinds lock_dir_path
+      >>| List.filter_map ~f:(fun (name, (kind : Unix.file_kind)) ->
+        match kind with
+        | S_REG -> Package_filename.to_package_name name |> Result.to_option
+        | _ ->
+          (* TODO *)
+          None)
+      >>= Io.parallel_map ~f:(fun package_name ->
+        let+ pkg = load_pkg ~version ~lock_dir_path package_name in
+        package_name, pkg)
+      >>| Package_name.Map.of_list_exn
+    in
+    check_packages packages ~lock_dir_path
+    |> Result.map ~f:(fun () ->
+      { version
+      ; dependency_hash
+      ; packages
+      ; ocaml
+      ; repos
+      ; expanded_solver_variable_bindings
+      })
+  ;;
+
   let load lock_dir_path =
     let open Io.O in
     let* result = check_path lock_dir_path in
     match result with
     | Error e -> Io.return (Error e)
-    | Ok () ->
-      let* version, dependency_hash, ocaml, repos, expanded_solver_variable_bindings =
-        load_metadata (Path.Source.relative lock_dir_path metadata_filename)
-      in
-      let+ packages =
-        Io.readdir_with_kinds lock_dir_path
-        >>| List.filter_map ~f:(fun (name, (kind : Unix.file_kind)) ->
-          match kind with
-          | S_REG -> Package_filename.to_package_name name |> Result.to_option
-          | _ ->
-            (* TODO *)
-            None)
-        >>= Io.parallel_map ~f:(fun package_name ->
-          let+ pkg = load_pkg ~version ~lock_dir_path package_name in
-          package_name, pkg)
-        >>| Package_name.Map.of_list_exn
-      in
-      check_packages packages ~lock_dir_path
-      |> Result.map ~f:(fun () ->
-        { version
-        ; dependency_hash
-        ; packages
-        ; ocaml
-        ; repos
-        ; expanded_solver_variable_bindings
-        })
+    | Ok `Dir -> load_dir lock_dir_path
+    | Ok `File -> load_file lock_dir_path
   ;;
 
   let load_exn lock_dir_path =

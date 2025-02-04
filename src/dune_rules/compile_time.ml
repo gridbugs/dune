@@ -7,3 +7,7 @@ let pkg_build_progress =
 ;;
 
 let lock_dev_tools = Config.make_toggle ~name:"lock_dev_tool" ~default:Setup.lock_dev_tool
+
+let single_lockfile =
+  Config.make_toggle ~name:"single_lock_file" ~default:Setup.single_lockfile
+;;

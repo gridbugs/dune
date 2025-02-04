@@ -164,7 +164,11 @@ let lock_dir_active ctx =
     get_path ctx
     >>= function
     | None -> Memo.return false
-    | Some path -> Fs_memo.dir_exists (In_source_dir path)
+    | Some path ->
+      let path = Path.Outside_build_dir.In_source_dir path in
+      let+ dir_exists = Fs_memo.dir_exists path
+      and+ file_exists = Fs_memo.file_exists path in
+      dir_exists || file_exists
 ;;
 
 let source_kind (source : Dune_pkg.Source.t) =
