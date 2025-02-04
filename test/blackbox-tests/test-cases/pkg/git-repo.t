@@ -48,47 +48,6 @@ version in the lock file
   Solution for dune.lock:
   - foo.1.1
 
-If the package selected has some additional files that are supposed to be
-included for building, these should also be part of the lockfile.
-
-So if we create an extra-file (in OPAM parlance) and attach it to foo.1.2 it
-should also be included.
-
-  $ FILES_NAME=hello.txt
-  $ cat > $FILES_NAME <<EOF
-  > Hello World
-  > EOF
-  $ FILES_CHECKSUM=e59ff97941044f85df5297e1c302d260
-  $ mkpkg foo 1.2 <<EOF
-  > EOF
-  $ echo "extra-files: [\"$FILES_NAME\" \"md5=$FILES_CHECKSUM\"]" >> mock-opam-repository/packages/foo/foo.1.2/opam
-  $ FILES_FOLDER=mock-opam-repository/packages/foo/foo.1.2/files/
-  $ mkdir -p "$FILES_FOLDER"
-  $ mv "$FILES_NAME" "$FILES_FOLDER/$FILES_NAME"
-  $ cd mock-opam-repository
-  $ git add -A
-  $ git commit --quiet -m "foo 1.2 with files"
-  $ cd ..
-
-Locking should be successful and it should include the additional file
-
-  $ XDG_CACHE_HOME=$PWD/dune-cache dune pkg lock
-  Solution for dune.lock:
-  - foo.1.2
-
-  $ find dune.lock | sort
-  dune.lock
-  dune.lock/foo.files
-  dune.lock/foo.files/hello.txt
-  dune.lock/foo.pkg
-  dune.lock/lock.dune
-
-The extra-file should have the same content as the original file, we determine
-that by hashing with the checksum that we expected in the OPAM file
-
-  $ cmp -s dune.lock/foo.files/$FILES_NAME "$FILES_FOLDER/$FILES_NAME" && echo "The contents match"
-  The contents match
-
 The git repos support repo should also be able to handle unusual objects in our
 tree, which can e.g. happen with submodules.
 
@@ -115,8 +74,6 @@ Thus ls-tree should now also contain a commit object:
   $ git ls-tree -r HEAD | awk '{ printf "%s %s\n",$2,$4; }' | sort
   blob packages/foo/foo.1.0/opam
   blob packages/foo/foo.1.1/opam
-  blob packages/foo/foo.1.2/files/hello.txt
-  blob packages/foo/foo.1.2/opam
   commit dangling-commit-in-tree
   $ cd ..
 

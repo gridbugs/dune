@@ -38,24 +38,24 @@ let discover_layout loc name mount =
   in
   Mount.stat mount opam_file
   >>= function
-  | `File -> Fiber.return (opam_file, None)
+  | `File -> Fiber.return opam_file
   | _ ->
     let opam_file_or_dir = Path.Local.of_string "opam" in
     Mount.stat mount opam_file_or_dir
     >>= (function
-     | `File -> Fiber.return (opam_file_or_dir, None)
+     | `File -> Fiber.return opam_file_or_dir
      | `Absent_or_unrecognized -> abort ()
      | `Dir ->
        let opam_file = Path.Local.relative opam_file_or_dir name_opam in
        Mount.stat mount opam_file
        >>= (function
-        | `File -> Fiber.return (opam_file, None)
+        | `File -> Fiber.return opam_file
         | `Dir -> must_be_a_file opam_file
         | `Absent_or_unrecognized ->
           let file = Path.Local.relative opam_file_or_dir "opam" in
           Mount.stat mount file
           >>| (function
-           | `File -> file, Some (Path.Local.relative opam_file_or_dir "files")
+           | `File -> file
            | `Dir -> must_be_a_file file
            | `Absent_or_unrecognized -> abort ())))
 ;;
@@ -68,10 +68,9 @@ let resolve_package { Local_package.loc; url = loc_url, url; name; version; orig
   in
   let+ resolved_package =
     let* mount = Mount.of_opam_url loc_url url in
-    let* opam_file_path, files_dir = discover_layout loc name mount in
+    let* opam_file_path = discover_layout loc name mount in
     match Mount.backend mount with
-    | Path dir ->
-      Resolved_package.local_fs package ~dir ~opam_file_path ~files_dir |> Fiber.return
+    | Path dir -> Resolved_package.local_fs package ~dir ~opam_file_path |> Fiber.return
     | Git rev ->
       let+ opam_file_contents =
         (* CR-rgrinberg: not efficient to make such individual calls *)
@@ -93,12 +92,7 @@ let resolve_package { Local_package.loc; url = loc_url, url; name; version; orig
             ; "files", Dyn.list Path.Local.to_dyn files
             ]
       in
-      Resolved_package.git_repo
-        package
-        ~opam_file:opam_file_path
-        ~opam_file_contents
-        rev
-        ~files_dir
+      Resolved_package.git_repo package ~opam_file:opam_file_path ~opam_file_contents
   in
   Resolved_package.set_url resolved_package url
 ;;

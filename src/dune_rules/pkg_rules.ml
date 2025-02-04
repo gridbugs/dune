@@ -76,13 +76,6 @@ module Package_universe = struct
     | Project_dependencies ctx -> Lock_dir.get_exn ctx
     | Dev_tool dev_tool -> Lock_dir.of_dev_tool dev_tool
   ;;
-
-  let lock_dir_path t =
-    match t with
-    | Project_dependencies ctx -> Lock_dir.get_path ctx
-    | Dev_tool dev_tool ->
-      Memo.return (Some (Dune_pkg.Lock_dir.dev_tool_lock_dir_path dev_tool))
-  ;;
 end
 
 module Paths = struct
@@ -332,7 +325,6 @@ module Pkg = struct
     ; info : Pkg_info.t
     ; paths : Path.t Paths.t
     ; write_paths : Path.Build.t Paths.t
-    ; files_dir : Path.Build.t
     ; mutable exported_env : string Env_update.t list
     }
 
@@ -1115,13 +1107,6 @@ end = struct
           | `Inside_lock_dir pkg -> Some pkg
           | `System_provided -> None)
         >>| List.filter_opt
-      and+ files_dir =
-        let+ lock_dir =
-          Package_universe.lock_dir_path package_universe >>| Option.value_exn
-        in
-        Path.Build.append_source
-          (Context_name.build_dir (Package_universe.context_name package_universe))
-          (Dune_pkg.Lock_dir.Pkg.files_dir info.name ~lock_dir)
       in
       let id = Pkg.Id.gen () in
       let write_paths = Paths.make package_universe name ~relative:Path.Build.relative in
@@ -1178,7 +1163,6 @@ end = struct
         ; paths
         ; write_paths
         ; info
-        ; files_dir
         ; exported_env = []
         }
       in
@@ -1658,35 +1642,8 @@ let source_rules (pkg : Pkg.t) =
 let build_rule context_name ~source_deps (pkg : Pkg.t) =
   let+ build_action =
     let+ copy_action, build_action, install_action =
-      let+ copy_action =
-        let+ copy_action =
-          Fs_memo.dir_exists
-            (In_source_dir (Path.Build.drop_build_context_exn pkg.files_dir))
-          >>= function
-          | false -> Memo.return []
-          | true ->
-            let+ deps, source_deps = Source_deps.files (Path.build pkg.files_dir) in
-            let open Action_builder.O in
-            [ Action_builder.with_no_targets
-              @@ (Action_builder.deps deps
-                  >>> (Path.Set.to_list_map source_deps ~f:(fun src ->
-                         let dst =
-                           let local_path =
-                             Path.drop_prefix_exn src ~prefix:(Path.build pkg.files_dir)
-                           in
-                           Path.Build.append_local pkg.write_paths.source_dir local_path
-                         in
-                         Action.progn
-                           [ Action.mkdir (Path.Build.parent_exn dst)
-                           ; Action.copy src dst
-                           ])
-                       |> Action.concurrent
-                       |> Action.Full.make
-                       |> Action_builder.return))
-            ]
-        in
-        copy_action
-        @ List.map pkg.info.extra_sources ~f:(fun (local, _) ->
+      let copy_action =
+        List.map pkg.info.extra_sources ~f:(fun (local, _) ->
           (* If the package has extra sources, they will be
              initially stored in the extra_sources directory for that
              package. Prior to building, the contents of
@@ -1708,7 +1665,8 @@ let build_rule context_name ~source_deps (pkg : Pkg.t) =
             ]
           |> Action.Full.make
           |> Action_builder.With_targets.return)
-      and+ build_action =
+      in
+      let+ build_action =
         match Action_expander.build_command context_name pkg with
         | None -> Memo.return []
         | Some build_command -> build_command >>| List.singleton

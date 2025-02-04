@@ -53,6 +53,7 @@ module Context = struct
     | (* TODO proper error messages for packages skipped via avoid-version *)
       Unavailable
     | Avoid_version
+    | Extra_files
 
   let local_package_default_version =
     Package_version.to_opam_package_version Lock_dir.Pkg_info.default_version
@@ -134,6 +135,8 @@ module Context = struct
   let pp_rejection = function
     | Unavailable -> Pp.paragraph "Availability condition not satisfied"
     | Avoid_version -> Pp.paragraph "Package is excluded by avoid-version"
+    | Extra_files ->
+      Pp.paragraph "Package is excluded as it uses the unsupported 'extra-files' field"
   ;;
 
   let eval_to_bool (filter : OpamTypes.filter) : (bool, [> `Not_a_bool of string ]) result
@@ -177,7 +180,12 @@ module Context = struct
        so just tell opam_0install that there are no versions of this
        package available (technically true) and let it produce the error
        message. *)
-    if is_opam_available t opam_file then Ok opam_file else Error Unavailable
+    if not (is_opam_available t opam_file)
+    then Error Unavailable
+    else (
+      match OpamFile.OPAM.extra_files opam_file with
+      | Some (_ :: _) -> Error Extra_files
+      | None | Some [] -> Ok opam_file)
   ;;
 
   let pinned_candidate t resolved_package =
@@ -1757,7 +1765,6 @@ let solve_package_list packages ~context =
 module Solver_result = struct
   type t =
     { lock_dir : Lock_dir.t
-    ; files : File_entry.t Package_name.Map.Multi.t
     ; pinned_packages : Package_name.Set.t
     ; num_expanded_packages : int
     }
@@ -1878,7 +1885,7 @@ let solve_lock_dir
         let name = OpamPackage.name package |> Package_name.of_opam_package_name in
         (not (is_local_package name)) && not (Package_name.equal Dune_dep.name name))
     in
-    let* candidates_cache = Fiber_cache.to_table context.candidates_cache in
+    let+ candidates_cache = Fiber_cache.to_table context.candidates_cache in
     let ocaml, pkgs =
       let pkgs =
         let version_by_package_name =
@@ -1964,32 +1971,8 @@ let solve_lock_dir
           ~repos:(Some repos)
           ~expanded_solver_variable_bindings
     in
-    let+ files =
-      let resolved_packages =
-        List.map opam_packages_to_lock ~f:(fun opam_package ->
-          let candidates =
-            OpamPackage.name opam_package
-            |> Package_name.of_opam_package_name
-            |> Table.find_exn candidates_cache
-          in
-          OpamPackage.Version.Map.find
-            (OpamPackage.version opam_package)
-            candidates.resolved)
-      in
-      Resolved_package.get_opam_package_files resolved_packages
-      >>| List.map2 resolved_packages ~f:(fun resolved_package entries ->
-        let package_name =
-          Resolved_package.package resolved_package
-          |> OpamPackage.name
-          |> Package_name.of_opam_package_name
-        in
-        package_name, entries)
-      >>| List.filter ~f:(fun (_, entries) -> List.is_non_empty entries)
-      >>| Package_name.Map.of_list_exn
-    in
     Ok
       { Solver_result.lock_dir
-      ; files
       ; pinned_packages = pinned_package_names
       ; num_expanded_packages = Context.count_expanded_packages context
       }

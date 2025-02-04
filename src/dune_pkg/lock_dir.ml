@@ -235,10 +235,6 @@ module Pkg = struct
       ; field_l Fields.extra_sources encode_extra_source extra_sources
       ]
   ;;
-
-  let files_dir package_name ~lock_dir =
-    Path.Source.relative lock_dir (Package_name.to_string package_name ^ ".files")
-  ;;
 end
 
 module Repositories = struct
@@ -584,11 +580,7 @@ module Write_disk = struct
 
   type t = unit -> unit
 
-  let prepare
-    ~lock_dir_path:lock_dir_path_src
-    ~(files : File_entry.t Package_name.Map.Multi.t)
-    lock_dir
-    =
+  let prepare ~lock_dir_path:lock_dir_path_src lock_dir =
     let lock_dir_hidden_src =
       (* The original lockdir path with the lockdir renamed to begin with a ".". *)
       let hidden_basename = sprintf ".%s" (Path.Source.basename lock_dir_path_src) in
@@ -615,18 +607,7 @@ module Write_disk = struct
         (* TODO the version should be chosen based on the version of the lock
            directory we're outputting *)
         let pp = Dune_lang.Format.pp_top_sexps ~version:(3, 11) cst in
-        Format.asprintf "%a" Pp.to_fmt pp |> Io.write_file path;
-        Package_name.Map.iteri files ~f:(fun package_name files ->
-          let files_dir =
-            Path.relative lock_dir_path (Package_name.to_string package_name ^ ".files")
-          in
-          Path.mkdir_p files_dir;
-          List.iter files ~f:(fun { File_entry.original; local_file } ->
-            let dst = Path.append_local files_dir local_file in
-            Path.mkdir_p (Path.parent_exn dst);
-            match original with
-            | Path src -> Io.copy_file ~src ~dst ()
-            | Content content -> Io.write_file dst content)));
+        Format.asprintf "%a" Pp.to_fmt pp |> Io.write_file path);
       rename_old_lock_dir_to_hidden ();
       safely_rename_lock_dir_thunk ~dst:lock_dir_path_external lock_dir_path ();
       remove_hidden_dir_if_exists ()

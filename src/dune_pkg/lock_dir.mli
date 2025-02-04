@@ -85,12 +85,7 @@ module Write_disk : sig
   type lock_dir := t
   type t
 
-  val prepare
-    :  lock_dir_path:Path.Source.t
-    -> files:File_entry.t Package_name.Map.Multi.t
-    -> lock_dir
-    -> t
-
+  val prepare : lock_dir_path:Path.Source.t -> lock_dir -> t
   val commit : t -> unit
 end
 

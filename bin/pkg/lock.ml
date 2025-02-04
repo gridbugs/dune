@@ -122,7 +122,7 @@ let solve_lock_dir
     ~constraints:(constraints_of_workspace workspace ~lock_dir_path)
   >>= function
   | Error (`Diagnostic_message message) -> Fiber.return (Error (lock_dir_path, message))
-  | Ok { lock_dir; files; pinned_packages; num_expanded_packages } ->
+  | Ok { lock_dir; pinned_packages; num_expanded_packages } ->
     let time_end = Unix.gettimeofday () in
     let maybe_perf_stats =
       if print_perf_stats
@@ -149,7 +149,7 @@ let solve_lock_dir
     in
     progress_state := None;
     let+ lock_dir = Lock_dir.compute_missing_checksums ~pinned_packages lock_dir in
-    Ok (Lock_dir.Write_disk.prepare ~lock_dir_path ~files lock_dir, summary_message)
+    Ok (Lock_dir.Write_disk.prepare ~lock_dir_path lock_dir, summary_message)
 ;;
 
 let solve

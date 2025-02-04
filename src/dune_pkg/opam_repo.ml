@@ -14,7 +14,6 @@ module Paths = struct
       (OpamPackage.to_string package)
   ;;
 
-  let files_dir package = Path.Local.relative (package_dir package) "files"
   let opam_file package = Path.Local.relative (package_dir package) "opam"
 end
 
@@ -132,26 +131,19 @@ let load_opam_package_from_dir ~(dir : Path.t) package =
   let opam_file_path = Paths.opam_file package in
   match Path.exists (Path.append_local dir opam_file_path) with
   | false -> None
-  | true ->
-    let files_dir = Some (Paths.files_dir package) in
-    Some (Resolved_package.local_fs package ~dir ~opam_file_path ~files_dir)
+  | true -> Some (Resolved_package.local_fs package ~dir ~opam_file_path)
 ;;
 
 let load_packages_from_git rev_store opam_packages =
   let+ contents =
-    List.map opam_packages ~f:(fun (file, _, _, _) -> file)
+    List.map opam_packages ~f:(fun (file, _) -> file)
     |> Rev_store.content_of_files rev_store
   in
-  List.map2
-    opam_packages
-    contents
-    ~f:(fun (opam_file, package, rev, files_dir) opam_file_contents ->
-      Resolved_package.git_repo
-        package
-        ~opam_file:(Rev_store.File.path opam_file)
-        ~opam_file_contents
-        rev
-        ~files_dir:(Some files_dir))
+  List.map2 opam_packages contents ~f:(fun (opam_file, package) opam_file_contents ->
+    Resolved_package.git_repo
+      package
+      ~opam_file:(Rev_store.File.path opam_file)
+      ~opam_file_contents)
 ;;
 
 let all_packages_versions_in_dir loc ~dir opam_package_name =
@@ -193,9 +185,7 @@ let all_package_versions t opam_package_name =
     |> List.map ~f:(fun pkg -> `Directory pkg)
   | Repo rev ->
     all_packages_versions_at_rev rev opam_package_name
-    |> List.map ~f:(fun (file, pkg) ->
-      let files_dir = Paths.files_dir pkg in
-      `Git (file, pkg, rev, files_dir))
+    |> List.map ~f:(fun (file, pkg) -> `Git (file, pkg))
 ;;
 
 let load_all_versions ts opam_package_name =
@@ -207,7 +197,7 @@ let load_all_versions ts opam_package_name =
         let pkg =
           match pkg with
           | `Directory pkg -> pkg
-          | `Git (_, pkg, _, _) -> pkg
+          | `Git (_, pkg) -> pkg
         in
         OpamPackage.version pkg
       in
@@ -217,7 +207,7 @@ let load_all_versions ts opam_package_name =
     |> OpamPackage.Version.Map.values
     |> List.partition_map ~f:(fun (repo, pkg) ->
       match pkg with
-      | `Git (file, pkg, rev, files_dir) -> Left (file, pkg, rev, files_dir)
+      | `Git (file, pkg) -> Left (file, pkg)
       | `Directory pkg -> Right (repo, pkg))
   in
   let from_dirs =
@@ -237,7 +227,7 @@ let load_all_versions ts opam_package_name =
     | packages ->
       let* rev_store = Rev_store.get in
       let+ resolved_packages = load_packages_from_git rev_store packages in
-      List.map2 resolved_packages packages ~f:(fun resolved_package (_, pkg, _, _) ->
+      List.map2 resolved_packages packages ~f:(fun resolved_package (_, pkg) ->
         pkg, resolved_package)
   in
   from_dirs @ from_git

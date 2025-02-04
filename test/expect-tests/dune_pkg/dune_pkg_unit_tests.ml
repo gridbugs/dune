@@ -65,8 +65,7 @@ end
 
 let lock_dir_encode_decode_round_trip_test ?commit ~lock_dir_path ~lock_dir () =
   let lock_dir_path = Path.Source.of_string lock_dir_path in
-  Lock_dir.Write_disk.(
-    prepare ~lock_dir_path ~files:Package_name.Map.empty lock_dir |> commit);
+  Lock_dir.Write_disk.(prepare ~lock_dir_path lock_dir |> commit);
   let lock_dir_round_tripped =
     try Lock_dir.read_disk_exn lock_dir_path with
     | User_error.E _ as exn ->
