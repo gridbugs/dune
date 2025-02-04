@@ -16,3 +16,4 @@ let toolchains = `Enabled
 let pkg_build_progress = `Disabled
 let lock_dev_tool = `Disabled
 let single_lockfile = `Disabled
+let portable_lockfile = `Disabled
