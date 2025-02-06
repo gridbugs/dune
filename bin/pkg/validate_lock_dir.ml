@@ -40,7 +40,12 @@ let validate_lock_dirs ~lock_dirs () =
       List.filter_map lock_dirs_by_path ~f:(function
         | Error e -> Some e
         | Ok (path, lock_dir) ->
-          (match Package_universe.create local_packages lock_dir with
+          (match
+             Package_universe.create
+               local_packages
+               ((* TODO *) List.hd lock_dir.solutions)
+               ~dependency_hash_from_lockdir:None
+           with
            | Ok _ -> None
            | Error e -> Some (path, `Lock_dir_out_of_sync e)))
     with

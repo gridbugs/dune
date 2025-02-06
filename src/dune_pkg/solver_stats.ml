@@ -103,6 +103,13 @@ module Expanded_variable_bindings = struct
       ]
   ;;
 
+  let get { variable_values; _ } variable_name =
+    List.find_map variable_values ~f:(fun (variable_name_, value) ->
+      if Package_variable_name.equal variable_name_ variable_name
+      then Some value
+      else None)
+  ;;
+
   let to_solver_env { variable_values; unset_variables = _ } =
     List.fold_left variable_values ~init:Solver_env.empty ~f:(fun acc (variable, value) ->
       Solver_env.set acc variable value)

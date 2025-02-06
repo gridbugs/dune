@@ -2,8 +2,8 @@ open Import
 
 module Solver_result : sig
   type t =
-    { lock_dir : Lock_dir.t
-    ; pinned_packages : Package_name.Set.t
+    { solution : Lock_dir.Solution.t
+    ; ocaml : (Loc.t * Package_name.t) option
     ; num_expanded_packages : int
     }
 end

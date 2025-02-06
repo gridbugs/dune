@@ -27,3 +27,5 @@ val sys_ocaml_version : t -> string option Fiber.t
 (** Returns a solver environment where all the system-dependent values that
     could be retrieved are set *)
 val solver_env_from_current_system : t -> Solver_env.t Fiber.t
+
+val choose_solution_ext : t -> Lock_dir.t -> Lock_dir.Solution.t Fiber.t

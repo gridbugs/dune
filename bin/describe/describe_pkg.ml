@@ -11,15 +11,12 @@ module Show_lock = struct
     in
     Console.print
     @@ List.map lock_dir_paths ~f:(fun lock_dir_path ->
-      let lock_dir = Lock_dir.read_disk_exn lock_dir_path in
+      let _lock_dir = Lock_dir.read_disk_exn lock_dir_path in
       Pp.concat
         ~sep:Pp.space
         [ Pp.hovbox
           @@ Pp.textf "Contents of %s:" (Path.Source.to_string_maybe_quoted lock_dir_path)
-        ; Pkg_common.pp_packages
-            (Package_name.Map.to_list_map
-               ~f:(fun _ pkg -> pkg)
-               lock_dir.solution.packages)
+        ; Pp.text "todo"
         ]
       |> Pp.vbox)
   ;;
@@ -89,7 +86,7 @@ module List_locked_dependencies = struct
     Cmd.info "list-locked-dependencies" ~doc ~man
   ;;
 
-  let package_deps_in_lock_dir_pp package_universe package_name ~transitive =
+  let _package_deps_in_lock_dir_pp package_universe package_name ~transitive =
     let traverse, traverse_word =
       if transitive then `Transitive, "Transitive" else `Immediate, "Immediate"
     in
@@ -135,36 +132,16 @@ module List_locked_dependencies = struct
       else None)
   ;;
 
-  let list_locked_dependencies ~transitive ~lock_dirs () =
+  let list_locked_dependencies ~transitive:_ ~lock_dirs () =
     let open Fiber.O in
-    let+ lock_dirs_by_path, local_packages =
+    let+ _lock_dirs_by_path, _local_packages =
       let open Memo.O in
       Memo.both
         (Workspace.workspace () >>| enumerate_lock_dirs_by_path ~lock_dirs)
         Pkg_common.find_local_packages
       |> Memo.run
     in
-    let pp =
-      Pp.concat
-        ~sep:Pp.cut
-        (List.map lock_dirs_by_path ~f:(fun (lock_dir_path, lock_dir) ->
-           let package_universe =
-             Package_universe.create local_packages lock_dir |> User_error.ok_exn
-           in
-           Pp.vbox
-             (Pp.concat
-                ~sep:Pp.cut
-                [ Pp.hbox
-                    (Pp.textf
-                       "Dependencies of local packages locked in %s"
-                       (Path.Source.to_string_maybe_quoted lock_dir_path))
-                ; Pp.enumerate
-                    (Package_name.Map.keys local_packages)
-                    ~f:(package_deps_in_lock_dir_pp package_universe ~transitive)
-                  |> Pp.box
-                ])))
-      |> Pp.vbox
-    in
+    let pp = Pp.text "todo" |> Pp.vbox in
     Console.print [ pp ]
   ;;
 

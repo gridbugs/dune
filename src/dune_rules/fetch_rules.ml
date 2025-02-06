@@ -132,9 +132,9 @@ module A = Action_ext.Make (Spec)
 
 let action ~url ~checksum ~target ~kind = A.action { Spec.target; checksum; url; kind }
 
-let extract_checksums_and_urls (lockdir : Dune_pkg.Lock_dir.t) =
+let extract_checksums_and_urls (solution : Dune_pkg.Lock_dir.Solution.t) =
   Package.Name.Map.fold
-    lockdir.solution.packages
+    solution.packages
     ~init:(Checksum.Map.empty, Dune_digest.Map.empty)
     ~f:(fun package acc ->
       let sources =
@@ -155,8 +155,8 @@ let extract_checksums_and_urls (lockdir : Dune_pkg.Lock_dir.t) =
 ;;
 
 let find_checksum, find_url =
-  let add_checksums_and_urls (checksums, urls) lockdir =
-    let checksums', urls' = extract_checksums_and_urls lockdir in
+  let add_checksums_and_urls (checksums, urls) solution =
+    let checksums', urls' = extract_checksums_and_urls solution in
     Checksum.Map.superpose checksums checksums', Digest.Map.superpose urls urls'
   in
   let all =
@@ -170,10 +170,13 @@ let find_checksum, find_url =
               (In_source_dir (Dune_pkg.Lock_dir.dev_tool_lock_dir_path dev_tool))
             >>= function
             | false -> Memo.return acc
-            | true -> Lock_dir.of_dev_tool dev_tool >>| add_checksums_and_urls acc)
+            | true ->
+              let* lockdir = Lock_dir.of_dev_tool dev_tool in
+              let+ solution = Lock_dir.Sys_vars.choose_solution_exn lockdir in
+              add_checksums_and_urls acc solution)
       in
       Per_context.list ()
-      >>= Memo.parallel_map ~f:Lock_dir.get
+      >>= Memo.parallel_map ~f:Lock_dir.get_solution
       >>| List.filter_map ~f:Result.to_option
       >>| List.fold_left ~init ~f:add_checksums_and_urls)
   in

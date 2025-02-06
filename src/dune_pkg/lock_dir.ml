@@ -300,6 +300,12 @@ module Solution = struct
     ; expanded_solver_variable_bindings : Solver_stats.Expanded_variable_bindings.t
     }
 
+  let empty =
+    { packages = Package_name.Map.empty
+    ; expanded_solver_variable_bindings = Solver_stats.Expanded_variable_bindings.empty
+    }
+  ;;
+
   let equal { packages; expanded_solver_variable_bindings } t =
     Package_name.Map.equal packages t.packages ~equal:Pkg.equal
     && Solver_stats.Expanded_variable_bindings.equal
@@ -314,6 +320,39 @@ module Solution = struct
         , Solver_stats.Expanded_variable_bindings.to_dyn expanded_solver_variable_bindings
         )
       ]
+  ;;
+
+  let encode { packages; expanded_solver_variable_bindings } =
+    let open Encoder in
+    let packages =
+      Package_name.Map.values packages
+      |> List.map ~f:(fun pkg -> Dune_sexp.List (Pkg.encode ~include_name:true pkg))
+    in
+    [ Dune_sexp.List
+        (string "expanded_solver_variable_bindings"
+         :: Solver_stats.Expanded_variable_bindings.encode
+              expanded_solver_variable_bindings)
+    ; Dune_sexp.List (string "packages" :: packages)
+    ]
+  ;;
+
+  let decode =
+    let open Decoder in
+    enter
+    @@ fields
+         (let+ expanded_solver_variable_bindings =
+            field
+              "expanded_solver_variable_bindings"
+              ~default:Solver_stats.Expanded_variable_bindings.empty
+              Solver_stats.Expanded_variable_bindings.decode
+          and+ packages = field "packages" ~default:[] (repeat Pkg.decode) in
+          fun ~lock_dir ->
+            let packages =
+              Package_name.Map.of_list_map_exn packages ~f:(fun make_package ->
+                let package : Pkg.t = make_package ~lock_dir ~name_external:None in
+                package.info.name, package)
+            in
+            { expanded_solver_variable_bindings; packages })
   ;;
 
   let transitive_dependency_closure t start =
@@ -357,6 +396,19 @@ module Solution = struct
     in
     { t with packages }
   ;;
+
+  let remove_locs t =
+    { t with packages = Package_name.Map.map t.packages ~f:Pkg.remove_locs }
+  ;;
+
+  let platform_string { expanded_solver_variable_bindings; _ } =
+    let get name =
+      Solver_stats.Expanded_variable_bindings.get expanded_solver_variable_bindings name
+      |> Option.value_exn
+      |> Variable_value.to_string
+    in
+    sprintf "%s-%s" (get Package_variable_name.arch) (get Package_variable_name.os)
+  ;;
 end
 
 type t =
@@ -364,20 +416,17 @@ type t =
   ; dependency_hash : (Loc.t * Local_package.Dependency_hash.t) option
   ; ocaml : (Loc.t * Package_name.t) option
   ; repos : Repositories.t
-  ; solution : Solution.t
+  ; solutions : Solution.t list
   }
 
 let remove_locs t =
   { t with
-    solution =
-      { t.solution with
-        Solution.packages = Package_name.Map.map t.solution.packages ~f:Pkg.remove_locs
-      }
+    solutions = List.map t.solutions ~f:Solution.remove_locs
   ; ocaml = Option.map t.ocaml ~f:(fun (_, ocaml) -> Loc.none, ocaml)
   }
 ;;
 
-let equal { version; dependency_hash; ocaml; repos; solution } t =
+let equal { version; dependency_hash; ocaml; repos; solutions } t =
   Syntax.Version.equal version t.version
   && Option.equal
        (Tuple.T2.equal Loc.equal Local_package.Dependency_hash.equal)
@@ -385,10 +434,10 @@ let equal { version; dependency_hash; ocaml; repos; solution } t =
        t.dependency_hash
   && Option.equal (Tuple.T2.equal Loc.equal Package_name.equal) ocaml t.ocaml
   && Repositories.equal repos t.repos
-  && Solution.equal solution t.solution
+  && List.equal Solution.equal solutions t.solutions
 ;;
 
-let to_dyn { version; dependency_hash; ocaml; repos; solution } =
+let to_dyn { version; dependency_hash; ocaml; repos; solutions } =
   Dyn.record
     [ "version", Syntax.Version.to_dyn version
     ; ( "dependency_hash"
@@ -397,7 +446,7 @@ let to_dyn { version; dependency_hash; ocaml; repos; solution } =
           dependency_hash )
     ; "ocaml", Dyn.option (Tuple.T2.to_dyn Loc.to_dyn_hum Package_name.to_dyn) ocaml
     ; "repos", Repositories.to_dyn repos
-    ; "solution", Solution.to_dyn solution
+    ; "solutions", Dyn.list Solution.to_dyn solutions
     ]
 ;;
 
@@ -428,24 +477,18 @@ let validate_packages packages =
   else Error (`Missing_dependencies missing_dependencies)
 ;;
 
-let create_latest_version
-  packages
-  ~local_packages
-  ~ocaml
-  ~repos
-  ~expanded_solver_variable_bindings
-  =
-  let solution = { Solution.packages; expanded_solver_variable_bindings } in
-  (match validate_packages packages with
-   | Ok () -> ()
-   | Error (`Missing_dependencies missing_dependencies) ->
-     List.map missing_dependencies ~f:(fun { dependant_package; dependency; loc = _ } ->
-       ( "missing dependency"
-       , Dyn.record
-           [ "missing package", Package_name.to_dyn dependency
-           ; "dependency of", Package_name.to_dyn dependant_package.info.name
-           ] ))
-     |> Code_error.raise "Invalid package table");
+let create_latest_version solutions ~local_packages ~ocaml ~repos =
+  List.iter solutions ~f:(fun (solution : Solution.t) ->
+    match validate_packages solution.packages with
+    | Ok () -> ()
+    | Error (`Missing_dependencies missing_dependencies) ->
+      List.map missing_dependencies ~f:(fun { dependant_package; dependency; loc = _ } ->
+        ( "missing dependency"
+        , Dyn.record
+            [ "missing package", Package_name.to_dyn dependency
+            ; "dependency of", Package_name.to_dyn dependant_package.info.name
+            ] ))
+      |> Code_error.raise "Invalid package table");
   let version = Syntax.greatest_supported_version_exn Dune_lang.Pkg.syntax in
   let dependency_hash =
     local_packages
@@ -461,7 +504,7 @@ let create_latest_version
       let complete = Int.equal (List.length repos) (List.length used) in
       complete, Some used
   in
-  { version; dependency_hash; ocaml; repos = { complete; used }; solution }
+  { version; dependency_hash; ocaml; repos = { complete; used }; solutions }
 ;;
 
 let dev_tools_path = Path.Source.(relative root "dev-tools.locks")
@@ -479,7 +522,13 @@ module Metadata = Dune_sexp.Versioned_file.Make (Unit)
 
 let () = Metadata.Lang.register Dune_lang.Pkg.syntax ()
 
-let encode_metadata { version; dependency_hash; ocaml; repos; solution } =
+let single_solution t =
+  match t.solutions with
+  | [ solution ] -> solution
+  | _ -> failwith "lockdirs can only be used when there is a single solution"
+;;
+
+let encode_metadata { version; dependency_hash; ocaml; repos; solutions } =
   let open Encoder in
   let base =
     list
@@ -504,26 +553,30 @@ let encode_metadata { version; dependency_hash; ocaml; repos; solution } =
      | Some ocaml -> [ list sexp [ string "ocaml"; Package_name.encode (snd ocaml) ] ])
   @ [ list sexp (string "repositories" :: Repositories.encode repos) ]
   @
-  if Solver_stats.Expanded_variable_bindings.is_empty
-       solution.expanded_solver_variable_bindings
-  then []
-  else
-    [ list
-        sexp
-        (string "expanded_solver_variable_bindings"
-         :: Solver_stats.Expanded_variable_bindings.encode
-              solution.expanded_solver_variable_bindings)
-    ]
+  match solutions with
+  | [ solution ] ->
+    (* TODO to continue supporting lockdirs, fall back to the original
+       behaviour when there is only one solution. *)
+    if Solver_stats.Expanded_variable_bindings.is_empty
+         solution.expanded_solver_variable_bindings
+    then []
+    else
+      [ list
+          sexp
+          (string "expanded_solver_variable_bindings"
+           :: Solver_stats.Expanded_variable_bindings.encode
+                solution.expanded_solver_variable_bindings)
+      ]
+  | _ -> []
 ;;
 
 let encode t =
   let open Encoder in
   let metadata = encode_metadata t in
-  let packages =
-    Package_name.Map.values t.solution.packages
-    |> List.map ~f:(fun pkg -> Dune_sexp.List (Pkg.encode ~include_name:true pkg))
+  let solutions =
+    List.map t.solutions ~f:(fun solution -> Dune_sexp.List (Solution.encode solution))
   in
-  metadata @ [ List (string "packages" :: packages) ]
+  metadata @ [ Dune_sexp.List (string "solutions" :: solutions) ]
 ;;
 
 let decode =
@@ -534,12 +587,14 @@ let decode =
        field_o "dependency_hash" (located Local_package.Dependency_hash.decode)
      and+ repos = field "repositories" ~default:Repositories.default Repositories.decode
      and+ expanded_solver_variable_bindings =
+       (* TODO this field is currently duplicated between here and each
+          solution for backwards compatibility with non-portable lockdirs. *)
        field
          "expanded_solver_variable_bindings"
          ~default:Solver_stats.Expanded_variable_bindings.empty
          Solver_stats.Expanded_variable_bindings.decode
-     and+ packages = field "packages" ~default:[] (repeat Pkg.decode) in
-     ocaml, dependency_hash, repos, expanded_solver_variable_bindings, packages)
+     and+ solutions = field "solutions" ~default:[] (repeat Solution.decode) in
+     ocaml, dependency_hash, repos, expanded_solver_variable_bindings, solutions)
 ;;
 
 module Package_filename = struct
@@ -555,7 +610,7 @@ end
 
 let file_contents_by_path t =
   (metadata_filename, encode_metadata t)
-  :: (Package_name.Map.to_list t.solution.packages
+  :: (Package_name.Map.to_list (single_solution t).packages
       |> List.map ~f:(fun (name, pkg) ->
         Package_filename.of_package_name name, Pkg.encode ~include_name:false pkg))
 ;;
@@ -727,8 +782,9 @@ struct
          , dependency_hash
          , ocaml
          , repos
-         , expanded_solver_variable_bindings
-         , packages )
+         , _expanded_solver_variable_bindings
+           (* when loading files this is taken from the solutions list instead *)
+         , solutions )
       =
       Io.with_lexbuf_from_file path ~f:(fun lexbuf ->
         Metadata.parse_contents
@@ -747,7 +803,7 @@ struct
                  , dependency_hash
                  , repos
                  , expanded_solver_variable_bindings
-                 , packages )
+                 , solutions )
               =
               decode
             in
@@ -757,18 +813,14 @@ struct
             , ocaml
             , repos
             , expanded_solver_variable_bindings
-            , packages )))
+            , solutions )))
     in
     if String.equal (Syntax.name syntax) (Syntax.name Dune_lang.Pkg.syntax)
     then (
-      let packages =
-        List.map packages ~f:(fun make_package ->
-          let package : Pkg.t = make_package ~lock_dir:path ~name_external:None in
-          package.info.name, package)
-        |> Package_name.Map.of_list_exn
+      let solutions =
+        List.map solutions ~f:(fun make_solution -> make_solution ~lock_dir:path)
       in
-      let solution = { Solution.packages; expanded_solver_variable_bindings } in
-      Ok { version; dependency_hash; ocaml; repos; solution })
+      Ok { version; dependency_hash; ocaml; repos; solutions })
     else
       Error
         (User_error.make
@@ -925,8 +977,8 @@ struct
     in
     check_packages packages ~lock_dir_path
     |> Result.map ~f:(fun () ->
-      let solution = { Solution.packages; expanded_solver_variable_bindings } in
-      { version; dependency_hash; ocaml; repos; solution })
+      let solutions = [ { Solution.packages; expanded_solver_variable_bindings } ] in
+      { version; dependency_hash; ocaml; repos; solutions })
   ;;
 
   let load lock_dir_path =
@@ -969,6 +1021,29 @@ let read_disk_exn = Load_immediate.load_exn
 
 let compute_missing_checksums t ~pinned_packages =
   let open Fiber.O in
-  let+ solution = Solution.compute_missing_checksums t.solution ~pinned_packages in
-  { t with solution }
+  let+ solutions =
+    Fiber.parallel_map
+      t.solutions
+      ~f:(Solution.compute_missing_checksums ~pinned_packages)
+  in
+  { t with solutions }
+;;
+
+let choose_solution { solutions; _ } ~os ~arch =
+  List.find solutions ~f:(fun solution ->
+    let get =
+      Solver_stats.Expanded_variable_bindings.get
+        solution.expanded_solver_variable_bindings
+    in
+    match get Package_variable_name.os, get Package_variable_name.arch with
+    | Some os_, Some arch_ ->
+      String.equal (Variable_value.to_string os_) os
+      && String.equal (Variable_value.to_string arch_) arch
+    | _ -> false)
+;;
+
+let choose_solution_exn t ~os ~arch =
+  match choose_solution t ~os ~arch with
+  | Some solution -> solution
+  | None -> User_error.raise [ Pp.textf "No solution for %s on %s" os arch ]
 ;;

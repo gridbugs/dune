@@ -66,6 +66,22 @@ module Sys_vars = struct
                (Dune_sexp.Template.Pform.describe source)
            ])
   ;;
+
+  let os () =
+    let+ os = Memo.Lazy.force poll.os in
+    Option.value_exn os
+  ;;
+
+  let arch () =
+    let+ arch = Memo.Lazy.force poll.arch in
+    Option.value_exn arch
+  ;;
+
+  let choose_solution_exn lock_dir =
+    let+ os = os ()
+    and+ arch = arch () in
+    Lock_dir.choose_solution_exn lock_dir ~os ~arch
+  ;;
 end
 
 module Load = Make_load (struct
@@ -134,18 +150,33 @@ let get_with_path ctx =
   >>= function
   | Error e -> Memo.return (Error e)
   | Ok lock_dir ->
-    let+ workspace_lock_dir = get_workspace_lock_dir ctx in
-    (match workspace_lock_dir with
-     | None -> ()
-     | Some workspace_lock_dir ->
-       Solver_stats.Expanded_variable_bindings.validate_against_solver_env
-         lock_dir.solution.expanded_solver_variable_bindings
-         (workspace_lock_dir.solver_env |> Option.value ~default:Solver_env.empty));
+    let* workspace_lock_dir = get_workspace_lock_dir ctx in
+    let+ () =
+      match workspace_lock_dir with
+      | None -> Memo.return ()
+      | Some workspace_lock_dir ->
+        let+ solution = Sys_vars.choose_solution_exn lock_dir in
+        Solver_stats.Expanded_variable_bindings.validate_against_solver_env
+          solution.expanded_solver_variable_bindings
+          (workspace_lock_dir.solver_env |> Option.value ~default:Solver_env.empty)
+    in
     Ok (path, lock_dir)
 ;;
 
 let get ctx = get_with_path ctx >>| Result.map ~f:snd
 let get_exn ctx = get ctx >>| User_error.ok_exn
+
+let get_solution ctx =
+  let* lock_dir = get ctx in
+  match lock_dir with
+  | Ok lock_dir -> Sys_vars.choose_solution_exn lock_dir >>| Result.ok
+  | Error e -> Memo.return (Error e)
+;;
+
+let get_solution_exn ctx =
+  let* lock_dir = get_exn ctx in
+  Sys_vars.choose_solution_exn lock_dir
+;;
 
 let of_dev_tool dev_tool =
   let path = Dune_pkg.Lock_dir.dev_tool_lock_dir_path dev_tool in
@@ -156,6 +187,8 @@ let of_dev_tool dev_tool =
     User_error.raise
       [ Pp.textf "%s does not exist" (Path.Source.to_string_maybe_quoted path) ]
 ;;
+
+let solution_of_dev_tool dev_tool = of_dev_tool dev_tool >>= Sys_vars.choose_solution_exn
 
 let lock_dir_active ctx =
   if !Clflags.ignore_lock_dir

@@ -26,9 +26,10 @@ let print_depexts ~lock_dirs_arg =
   let depexts =
     enumerate_lock_dirs_by_path workspace ~lock_dirs:lock_dirs_arg
     |> List.concat_map ~f:(fun lock_dir ->
-      lock_dir.solution.packages
-      |> Package_name.Map.values
-      |> List.concat_map ~f:(fun (pkg : Lock_dir.Pkg.t) -> pkg.depexts))
+      List.concat_map lock_dir.solutions ~f:(fun solution ->
+        solution.packages
+        |> Package_name.Map.values
+        |> List.concat_map ~f:(fun (pkg : Lock_dir.Pkg.t) -> pkg.depexts)))
   in
   Console.print [ Pp.concat_map ~sep:Pp.newline ~f:Pp.verbatim depexts ]
 ;;

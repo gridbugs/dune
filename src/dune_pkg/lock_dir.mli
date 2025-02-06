@@ -40,7 +40,7 @@ module Repositories : sig
 end
 
 module Solution : sig
-  type t = private
+  type t =
     { packages : Pkg.t Package_name.Map.t
     (** It's guaranteed that this map will contain an entry for all dependencies
         of all packages in this map. That is, the set of packages is closed under
@@ -51,6 +51,8 @@ module Solution : sig
         with a particular system. *)
     }
 
+  val empty : t
+
   (** [transitive_dependency_closure t names] returns the set of package names
       making up the transitive closure of dependencies of the set [names], or
       [Error (`Missing_packages missing_packages)] if if any element of [names]
@@ -60,6 +62,8 @@ module Solution : sig
     :  t
     -> Package_name.Set.t
     -> (Package_name.Set.t, [ `Missing_packages of Package_name.Set.t ]) result
+
+  val platform_string : t -> string
 end
 
 type t = private
@@ -67,7 +71,7 @@ type t = private
   ; dependency_hash : (Loc.t * Local_package.Dependency_hash.t) option
   ; ocaml : (Loc.t * Package_name.t) option
   ; repos : Repositories.t
-  ; solution : Solution.t
+  ; solutions : Solution.t list
   }
 
 val remove_locs : t -> t
@@ -80,11 +84,10 @@ val to_dyn : t -> Dyn.t
     dependency of every package in [packages] must itself have a corresponding
     entry in [packages]. *)
 val create_latest_version
-  :  Pkg.t Package_name.Map.t
+  :  Solution.t list
   -> local_packages:Local_package.For_solver.t list
   -> ocaml:(Loc.t * Package_name.t) option
   -> repos:Opam_repo.t list option
-  -> expanded_solver_variable_bindings:Solver_stats.Expanded_variable_bindings.t
   -> t
 
 val default_path : Path.Source.t
@@ -128,3 +131,6 @@ end
 (** Attempt to download and compute checksums for packages that have source
     archive urls but no checksum. *)
 val compute_missing_checksums : t -> pinned_packages:Package_name.Set.t -> t Fiber.t
+
+val choose_solution : t -> os:string -> arch:string -> Solution.t option
+val choose_solution_exn : t -> os:string -> arch:string -> Solution.t

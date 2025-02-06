@@ -226,15 +226,13 @@ let validate t =
   |> check_for_unnecessary_packges_in_solution t.solution
 ;;
 
-let create local_packages (lock_dir : Lock_dir.t) =
+let create local_packages (solution : Lock_dir.Solution.t) ~dependency_hash_from_lockdir =
   try
-    let solution = lock_dir.solution in
     let version_by_package_name = version_by_package_name local_packages solution in
     let solver_env =
       Solver_stats.Expanded_variable_bindings.to_solver_env
         solution.expanded_solver_variable_bindings
     in
-    let dependency_hash_from_lockdir = lock_dir.dependency_hash in
     let t =
       { local_packages
       ; solution

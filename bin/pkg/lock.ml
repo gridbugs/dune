@@ -72,13 +72,33 @@ let lock_dir_type =
   | `Disabled -> `Dir
 ;;
 
+let solve_lock_dir_for_popular_envs
+  version_preference
+  repos
+  ~pins
+  ~local_packages
+  ~constraints
+  =
+  let open Fiber.O in
+  Fiber.parallel_map Dune_pkg.Solver_env.popular_envs ~f:(fun solver_env ->
+    Dune_pkg.Opam_solver.solve_lock_dir
+      solver_env
+      version_preference
+      repos
+      ~pins
+      ~local_packages
+      ~constraints)
+  >>| (* TODO: Save diagnostics to the lockfile so users on unsupported platforms can learn why those platforms don't have solutions. *)
+  List.filter_map ~f:Result.to_option
+;;
+
 let solve_lock_dir
   workspace
   ~local_packages
   ~project_pins
   ~print_perf_stats
   version_preference
-  solver_env_from_current_system
+  _solver_env_from_current_system
   lock_dir_path
   progress_state
   =
@@ -92,14 +112,6 @@ let solve_lock_dir
         Pin_stanza.DB.Workspace.extract workspace.pins ~names:lock_dir.pins
       in
       Pin_stanza.DB.combine_exn workspace project_pins
-  in
-  let solver_env =
-    solver_env
-      ~solver_env_from_context:
-        (Option.bind lock_dir ~f:(fun lock_dir -> lock_dir.solver_env))
-      ~solver_env_from_current_system
-      ~unset_solver_vars_from_context:
-        (unset_solver_vars_of_workspace workspace ~lock_dir_path)
   in
   let time_start = Unix.gettimeofday () in
   let* repos =
@@ -115,48 +127,58 @@ let solve_lock_dir
   let* pins = resolve_project_pins project_pins in
   let time_solve_start = Unix.gettimeofday () in
   progress_state := Some Progress_indicator.Per_lockdir.State.Solving;
-  Dune_pkg.Opam_solver.solve_lock_dir
-    solver_env
-    (Pkg_common.Version_preference.choose
-       ~from_arg:version_preference
-       ~from_context:
-         (Option.bind lock_dir ~f:(fun lock_dir -> lock_dir.version_preference)))
-    repos
-    ~pins
-    ~local_packages:
-      (Package_name.Map.map local_packages ~f:Dune_pkg.Local_package.for_solver)
-    ~constraints:(constraints_of_workspace workspace ~lock_dir_path)
-  >>= function
-  | Error (`Diagnostic_message message) -> Fiber.return (Error (lock_dir_path, message))
-  | Ok { lock_dir; pinned_packages; num_expanded_packages } ->
-    let time_end = Unix.gettimeofday () in
-    let maybe_perf_stats =
-      if print_perf_stats
-      then
-        [ Pp.nop
-        ; Pp.textf "Expanded packages: %d" num_expanded_packages
-        ; Pp.textf "Updated repos in: %.2fs" (time_solve_start -. time_start)
-        ; Pp.textf "Solved dependencies in: %.2fs" (time_end -. time_solve_start)
-        ]
-      else []
+  let local_packages =
+    Package_name.Map.map local_packages ~f:Dune_pkg.Local_package.for_solver
+  in
+  let* solver_results =
+    solve_lock_dir_for_popular_envs
+      (Pkg_common.Version_preference.choose
+         ~from_arg:version_preference
+         ~from_context:
+           (Option.bind lock_dir ~f:(fun lock_dir -> lock_dir.version_preference)))
+      repos
+      ~pins
+      ~local_packages
+      ~constraints:(constraints_of_workspace workspace ~lock_dir_path)
+  in
+  let time_end = Unix.gettimeofday () in
+  let maybe_perf_stats =
+    if print_perf_stats
+    then (
+      let num_expanded_packages_total =
+        List.fold_left
+          solver_results
+          ~init:0
+          ~f:(fun acc { Dune_pkg.Opam_solver.Solver_result.num_expanded_packages; _ } ->
+            acc + num_expanded_packages)
+      in
+      [ Pp.nop
+      ; Pp.textf "Expanded packages: %d" num_expanded_packages_total
+      ; Pp.textf "Updated repos in: %.2fs" (time_solve_start -. time_start)
+      ; Pp.textf "Solved dependencies in: %.2fs" (time_end -. time_solve_start)
+      ])
+    else []
+  in
+  let summary_message = User_message.make maybe_perf_stats in
+  progress_state := None;
+  let pinned_packages = Package_name.Set.of_keys pins in
+  let lock_dir =
+    let solutions, ocaml =
+      List.map
+        solver_results
+        ~f:(fun { Dune_pkg.Opam_solver.Solver_result.solution; ocaml; _ } ->
+          solution, ocaml)
+      |> List.unzip
     in
-    let summary_message =
-      User_message.make
-        (Pp.tag
-           User_message.Style.Success
-           (Pp.textf
-              "Solution for %s:"
-              (Path.Source.to_string_maybe_quoted lock_dir_path))
-         :: (match Package_name.Map.values lock_dir.solution.packages with
-             | [] ->
-               Pp.tag User_message.Style.Warning @@ Pp.text "(no dependencies to lock)"
-             | packages -> pp_packages packages)
-         :: maybe_perf_stats)
+    let ocaml =
+      (* TODO: different solutions may contain different ocaml compilers *)
+      List.hd ocaml
     in
-    progress_state := None;
-    let+ lock_dir = Lock_dir.compute_missing_checksums ~pinned_packages lock_dir in
-    Ok
-      (Lock_dir.Write_disk.prepare ~lock_dir_path ~lock_dir_type lock_dir, summary_message)
+    let local_packages = Package_name.Map.values local_packages in
+    Lock_dir.create_latest_version solutions ~local_packages ~ocaml ~repos:(Some repos)
+  in
+  let+ lock_dir = Lock_dir.compute_missing_checksums ~pinned_packages lock_dir in
+  Ok (Lock_dir.Write_disk.prepare ~lock_dir_path ~lock_dir_type lock_dir, summary_message)
 ;;
 
 let solve

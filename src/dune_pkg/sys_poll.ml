@@ -255,3 +255,9 @@ let solver_env_from_current_system t =
     | Some value -> Solver_env.set solver_env var value
     | None -> solver_env)
 ;;
+
+let choose_solution_ext t lock_dir =
+  let+ arch = arch t >>| Option.value_exn
+  and+ os = os t >>| Option.value_exn in
+  Lock_dir.choose_solution_exn lock_dir ~os ~arch
+;;

@@ -1769,8 +1769,8 @@ let solve_package_list packages ~context =
 
 module Solver_result = struct
   type t =
-    { lock_dir : Lock_dir.t
-    ; pinned_packages : Package_name.Set.t
+    { solution : Lock_dir.Solution.t
+    ; ocaml : (Loc.t * Package_name.t) option
     ; num_expanded_packages : int
     }
 end
@@ -1930,7 +1930,7 @@ let solve_lock_dir
       in
       ocaml, pkgs
     in
-    let lock_dir =
+    let solution =
       match pkgs with
       | Error (name, _pkg1, _pkg2) ->
         Code_error.raise
@@ -1969,16 +1969,11 @@ let solve_lock_dir
           Package_name.Map.filteri pkgs_by_name ~f:(fun name _ ->
             Package_name.Set.mem reachable name)
         in
-        Lock_dir.create_latest_version
-          pkgs_by_name
-          ~local_packages:(Package_name.Map.values local_packages)
-          ~ocaml
-          ~repos:(Some repos)
-          ~expanded_solver_variable_bindings
+        { Lock_dir.Solution.expanded_solver_variable_bindings; packages = pkgs_by_name }
     in
     Ok
-      { Solver_result.lock_dir
-      ; pinned_packages = pinned_package_names
+      { Solver_result.solution
+      ; ocaml
       ; num_expanded_packages = Context.count_expanded_packages context
       }
 ;;

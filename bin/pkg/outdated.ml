@@ -17,7 +17,10 @@ let find_outdated_packages ~transitive ~lock_dirs_arg () =
       and+ local_packages = Memo.run find_local_packages in
       let lock_dir = Lock_dir.read_disk_exn lock_dir_path in
       let+ results =
-        Dune_pkg_outdated.find ~repos ~local_packages lock_dir.solution.packages
+        Dune_pkg_outdated.find
+          ~repos
+          ~local_packages
+          ((* TODO *) List.hd lock_dir.solutions).packages
       in
       ( Dune_pkg_outdated.pp ~transitive ~lock_dir_path results
       , ( Dune_pkg_outdated.packages_that_were_not_found results

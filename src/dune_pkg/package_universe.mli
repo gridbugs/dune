@@ -7,7 +7,8 @@ type t
 
 val create
   :  Local_package.t Package_name.Map.t
-  -> Lock_dir.t
+  -> Lock_dir.Solution.t
+  -> dependency_hash_from_lockdir:(Loc.t * Local_package.Dependency_hash.t) option
   -> (t, User_message.t) result
 
 (** Verifies if the dependencies described in the project file are still

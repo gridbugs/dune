@@ -71,10 +71,10 @@ module Package_universe = struct
       Context_name.default
   ;;
 
-  let lock_dir t =
+  let solution t =
     match t with
-    | Project_dependencies ctx -> Lock_dir.get_exn ctx
-    | Dev_tool dev_tool -> Lock_dir.of_dev_tool dev_tool
+    | Project_dependencies ctx -> Lock_dir.get_solution_exn ctx
+    | Dev_tool dev_tool -> Lock_dir.solution_of_dev_tool dev_tool
   ;;
 end
 
@@ -1054,8 +1054,8 @@ module DB = struct
 
   let get package_universe =
     let dune = Package.Name.Set.singleton (Package.Name.of_string "dune") in
-    let+ all = Package_universe.lock_dir package_universe in
-    { all = all.solution.packages; system_provided = dune }
+    let+ all = Package_universe.solution package_universe in
+    { all = all.packages; system_provided = dune }
   ;;
 end
 
@@ -1759,8 +1759,8 @@ let setup_pkg_install_alias =
        sources. *)
     let open Action_builder.O in
     let project_deps : Package_universe.t = Project_dependencies ctx_name in
-    let* lock_dir = Action_builder.of_memo (Package_universe.lock_dir project_deps) in
-    Dune_lang.Package_name.Map.keys lock_dir.solution.packages
+    let* solution = Action_builder.of_memo (Package_universe.solution project_deps) in
+    Dune_lang.Package_name.Map.keys solution.packages
     |> List.map ~f:(fun pkg ->
       Paths.make ~relative:Path.Build.relative project_deps pkg
       |> Paths.target_dir

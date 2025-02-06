@@ -105,7 +105,7 @@ let locked_ocaml_compiler_version () =
     (* Dev tools are only ever built with the default context. *)
     Context_name.default
   in
-  let* result = Dune_rules.Lock_dir.get context in
+  let* result = Dune_rules.Lock_dir.get_solution context in
   match result with
   | Error _ ->
     User_error.raise
@@ -115,7 +115,7 @@ let locked_ocaml_compiler_version () =
             ~sep:Pp.space
             [ Pp.text "Try running"; User_message.command "dune pkg lock" ]
         ]
-  | Ok { solution; _ } ->
+  | Ok solution ->
     (match Package_name.Map.find solution.packages compiler_package_name with
      | None ->
        User_error.raise
@@ -164,7 +164,8 @@ let lockdir_status dev_tool =
   let dev_tool_lock_dir = Lock_dir.dev_tool_lock_dir_path dev_tool in
   match Lock_dir.read_disk dev_tool_lock_dir with
   | Error _ -> Memo.return `No_lockdir
-  | Ok { solution; _ } ->
+  | Ok lockdir ->
+    let solution = (* TODO *) List.hd lockdir.solutions in
     (match Dune_pkg.Dev_tool.needs_to_build_with_same_compiler_as_project dev_tool with
      | false -> Memo.return `Lockdir_ok
      | true ->
