@@ -642,7 +642,15 @@ module Action_expander = struct
     let expand_pkg (paths : Path.t Paths.t) (pform : Pform.Var.Pkg.t) =
       match pform with
       | Switch -> Memo.return [ Value.String "dune" ]
-      | Os -> sys_poll_var (fun { os; _ } -> os)
+      | Os ->
+        let+ x = sys_poll_var (fun { os; _ } -> os) in
+        print_endline
+          (sprintf
+             "os: %s"
+             (String.concat
+                ~sep:"~~~"
+                (List.map x ~f:(fun x -> Value.to_dyn x |> Dyn.to_string))));
+        x
       | Os_version -> sys_poll_var (fun { os_version; _ } -> os_version)
       | Os_distribution -> sys_poll_var (fun { os_distribution; _ } -> os_distribution)
       | Os_family -> sys_poll_var (fun { os_family; _ } -> os_family)
@@ -693,6 +701,10 @@ module Action_expander = struct
          | "enable" ->
            Memo.return @@ Ok [ Value.String (if present then "enable" else "disable") ]
          | "installed" -> Memo.return @@ Ok [ Value.String (Bool.to_string present) ]
+         | "with-doc" | "with-test" | "with-dev-setup" ->
+           (* For packages being built as dependencies of the project there
+              is no need to build the tests or documenttaion, or perform any dev setup. *)
+           Memo.return @@ Ok [ Value.false_ ]
          | _ ->
            (match paths with
             | None -> Memo.return (Error (`Undefined_pkg_var variable_name))
