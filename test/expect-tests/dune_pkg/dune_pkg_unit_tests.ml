@@ -1,6 +1,7 @@
 open Stdune
 module Checksum = Dune_pkg.Checksum
 module Lock_dir = Dune_pkg.Lock_dir
+module Depend = Dune_pkg.Lock_dir.Depend
 module Opam_repo = Dune_pkg.Opam_repo
 module Expanded_variable_bindings = Dune_pkg.Solver_stats.Expanded_variable_bindings
 module Package_variable_name = Dune_lang.Package_variable_name
@@ -253,7 +254,7 @@ let%expect_test "encode/decode round trip test for lockdir with complex deps" =
       , let pkg = empty_package name ~version:(Package_version.of_string "dev") in
         { pkg with
           install_command = None
-        ; depends = [ Loc.none, fst pkg_a ]
+        ; depends = [ { Depend.loc = Loc.none; name = fst pkg_a } ]
         ; info =
             { pkg.info with
               dev = true
@@ -275,7 +276,10 @@ let%expect_test "encode/decode round trip test for lockdir with complex deps" =
       ( name
       , let pkg = empty_package name ~version:(Package_version.of_string "0.2") in
         { pkg with
-          depends = [ Loc.none, fst pkg_a; Loc.none, fst pkg_b ]
+          depends =
+            [ { Depend.loc = Loc.none; name = fst pkg_a }
+            ; { Depend.loc = Loc.none; name = fst pkg_b }
+            ]
         ; info =
             { pkg.info with
               dev = false

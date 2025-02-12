@@ -1726,7 +1726,8 @@ let opam_package_to_lock_file_pkg
       |> List.filter ~f:(fun package_name ->
         not (List.mem depends package_name ~equal:Package_name.equal))
     in
-    depends @ depopts |> List.map ~f:(fun package_name -> Loc.none, package_name)
+    depends @ depopts
+    |> List.map ~f:(fun name -> { Lock_dir.Depend.loc = Loc.none; name })
   in
   let build_env action =
     let env_update =
@@ -1894,7 +1895,8 @@ let reject_unreachable_packages =
           Code_error.raise
             "package is both local and returned by solver"
             [ "name", Package_name.to_dyn name ]
-        | Some (pkg : Lock_dir.Pkg.t), None -> Some (List.map pkg.depends ~f:snd)
+        | Some (pkg : Lock_dir.Pkg.t), None ->
+          Some (List.map pkg.depends ~f:(fun (depend : Lock_dir.Depend.t) -> depend.name))
         | None, Some (pkg : Local_package.For_solver.t) ->
           let deps =
             match
@@ -2045,17 +2047,17 @@ let solve_lock_dir
         Package_name.Map.iter
           pkgs_by_name
           ~f:(fun { Lock_dir.Pkg.depends; info = { name; _ }; _ } ->
-            List.iter depends ~f:(fun (loc, dep_name) ->
-              if Package_name.Map.mem local_packages dep_name
+            List.iter depends ~f:(fun (depend : Lock_dir.Depend.t) ->
+              if Package_name.Map.mem local_packages depend.name
               then
                 User_error.raise
-                  ~loc
+                  ~loc:depend.loc
                   [ Pp.textf
                       "Dune does not support packages outside the workspace depending on \
                        packages in the workspace. The package %S is not in the workspace \
                        but it depends on the package %S which is in the workspace."
                       (Package_name.to_string name)
-                      (Package_name.to_string dep_name)
+                      (Package_name.to_string depend.name)
                   ]));
         let pkgs_by_name =
           let reachable =

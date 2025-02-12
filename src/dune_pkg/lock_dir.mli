@@ -21,11 +21,22 @@ module Build_command : sig
     | Dune (** pinned dune packages do not need to define a command *)
 end
 
+module Depend : sig
+  type t =
+    { loc : Loc.t
+    ; name : Package_name.t
+    }
+end
+
+module Depends : sig
+  type t = Depend.t list
+end
+
 module Pkg : sig
   type t =
     { build_command : Build_command.t option
     ; install_command : Action.t option
-    ; depends : (Loc.t * Package_name.t) list
+    ; depends : Depends.t
     ; depexts : string list
     ; info : Pkg_info.t
     ; exported_env : String_with_vars.t Action.Env_update.t list

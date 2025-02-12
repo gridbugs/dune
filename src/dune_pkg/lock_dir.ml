@@ -100,11 +100,48 @@ module Build_command = struct
   ;;
 end
 
+module Depend = struct
+  type t =
+    { loc : Loc.t
+    ; name : Package_name.t
+    }
+
+  let equal { loc; name } t = Loc.equal loc t.loc && Package_name.equal name t.name
+  let remove_locs { name; loc = _ } = { name; loc = Loc.none }
+
+  let to_dyn { loc; name } =
+    Dyn.record [ "loc", Loc.to_dyn_hum loc; "name", Package_name.to_dyn name ]
+  ;;
+
+  let decode =
+    let open Decoder in
+    let+ loc, name = located Package_name.decode in
+    { loc; name }
+  ;;
+
+  let encode { name; loc = _ } = Package_name.encode name
+end
+
+module Depends = struct
+  type t = Depend.t list
+
+  let equal = List.equal Depend.equal
+  let remove_locs = List.map ~f:Depend.remove_locs
+  let to_dyn = Dyn.list Depend.to_dyn
+
+  let decode =
+    let open Decoder in
+    enter @@ repeat Depend.decode
+  ;;
+
+  let encode t = Dune_lang.List (List.map t ~f:Depend.encode)
+end
+
 module Pkg = struct
   type t =
     { build_command : Build_command.t option
     ; install_command : Action.t option
-    ; depends : (Loc.t * Package_name.t) list
+    ; depends : Depends.t
     ; depexts : string list
     ; info : Pkg_info.t
     ; exported_env : String_with_vars.t Action.Env_update.t list
@@ -114,7 +151,7 @@ module Pkg = struct
     Option.equal Build_command.equal build_command t.build_command
     (* CR-rgrinberg: why do we ignore locations? *)
     && Option.equal Action.equal_no_locs install_command t.install_command
-    && List.equal (Tuple.T2.equal Loc.equal Package_name.equal) depends t.depends
+    && Depends.equal depends t.depends
     && List.equal String.equal depexts t.depexts
     && Pkg_info.equal info t.info
     && List.equal
@@ -128,7 +165,7 @@ module Pkg = struct
     { info = Pkg_info.remove_locs info
     ; exported_env =
         List.map exported_env ~f:(Action.Env_update.map ~f:String_with_vars.remove_locs)
-    ; depends = List.map depends ~f:(fun (_, pkg) -> Loc.none, pkg)
+    ; depends = Depends.remove_locs depends
     ; depexts
     ; build_command = Option.map build_command ~f:Build_command.remove_locs
     ; install_command = Option.map install_command ~f:Action.remove_locs
@@ -139,7 +176,7 @@ module Pkg = struct
     Dyn.record
       [ "build_command", Dyn.option Build_command.to_dyn build_command
       ; "install_command", Dyn.option Action.to_dyn install_command
-      ; "depends", Dyn.list (Dyn.pair Loc.to_dyn_hum Package_name.to_dyn) depends
+      ; "depends", Depends.to_dyn depends
       ; "depexts", Dyn.list String.to_dyn depexts
       ; "info", Pkg_info.to_dyn info
       ; ( "exported_env"
@@ -176,8 +213,7 @@ module Pkg = struct
     @@ let+ version = field Fields.version Package_version.decode
        and+ install_command = field_o Fields.install Action.decode_pkg
        and+ build_command = Build_command.decode
-       and+ depends =
-         field ~default:[] Fields.depends (repeat (located Package_name.decode))
+       and+ depends = field ~default:[] Fields.depends Depends.decode
        and+ depexts = field ~default:[] Fields.depexts (repeat string)
        and+ source = field_o Fields.source Source.decode
        and+ dev = field_b Fields.dev
@@ -227,7 +263,7 @@ module Pkg = struct
       [ field Fields.version Package_version.encode version
       ; field_o Fields.install Action.encode install_command
       ; Build_command.encode build_command
-      ; field_l Fields.depends Package_name.encode (List.map depends ~f:snd)
+      ; field Fields.depends Depends.encode depends
       ; field_l Fields.depexts string depexts
       ; field_o Fields.source Source.encode source
       ; field_b Fields.dev dev
@@ -362,14 +398,14 @@ let validate_packages packages =
   let missing_dependencies =
     Package_name.Map.values packages
     |> List.concat_map ~f:(fun (dependant_package : Pkg.t) ->
-      List.filter_map dependant_package.depends ~f:(fun (loc, dependency) ->
+      List.filter_map dependant_package.depends ~f:(fun depend ->
         (* CR-someday rgrinberg: do we need the dune check? aren't
            we supposed to filter these upfront? *)
         if
-          Package_name.Map.mem packages dependency
-          || Package_name.equal dependency Dune_dep.name
+          Package_name.Map.mem packages depend.name
+          || Package_name.equal depend.name Dune_dep.name
         then None
-        else Some { dependant_package; dependency; loc }))
+        else Some { dependant_package; dependency = depend.name; loc = depend.loc }))
   in
   if List.is_empty missing_dependencies
   then Ok ()
@@ -864,7 +900,9 @@ let transitive_dependency_closure t start =
              that its map of dependencies is closed under "depends on". *)
           Package_name.Set.(
             diff
-              (of_list_map (Package_name.Map.find_exn t.packages node).depends ~f:snd)
+              (of_list_map
+                 (Package_name.Map.find_exn t.packages node).depends
+                 ~f:(fun depend -> depend.name))
               seen)
         in
         push_set unseen_deps;

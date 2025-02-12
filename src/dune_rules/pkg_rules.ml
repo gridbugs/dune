@@ -1109,8 +1109,8 @@ end = struct
          } as pkg) ->
       assert (Package.Name.equal name info.name);
       let* depends =
-        Memo.parallel_map depends ~f:(fun name ->
-          resolve db name package_universe
+        Memo.parallel_map depends ~f:(fun depend ->
+          resolve db (depend.loc, depend.name) package_universe
           >>| function
           | `Inside_lock_dir pkg -> Some pkg
           | `System_provided -> None)
