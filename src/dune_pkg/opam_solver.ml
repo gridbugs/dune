@@ -1807,9 +1807,21 @@ let opam_package_to_lock_file_pkg
     OpamFile.OPAM.env opam_file |> List.map ~f:opam_env_update_to_env_update
   in
   let kind = if opam_file_is_compiler opam_file then `Compiler else `Non_compiler in
+  let depends_ =
+    [ { Lock_dir.Conditional_depends.condition = { os = "linux"; arch = "x86_64" }
+      ; depends
+      }
+    ]
+  in
   ( kind
-  , { Lock_dir.Pkg.build_command; install_command; depends; depexts; info; exported_env }
-  )
+  , { Lock_dir.Pkg.build_command
+    ; install_command
+    ; depends
+    ; depends_
+    ; depexts
+    ; info
+    ; exported_env
+    } )
 ;;
 
 let solve_package_list packages ~context =

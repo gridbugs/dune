@@ -32,11 +32,26 @@ module Depends : sig
   type t = Depend.t list
 end
 
+module Conditional_depends : sig
+  module Condition : sig
+    type t =
+      { os : string
+      ; arch : string
+      }
+  end
+
+  type t =
+    { condition : Condition.t
+    ; depends : Depends.t
+    }
+end
+
 module Pkg : sig
   type t =
     { build_command : Build_command.t option
     ; install_command : Action.t option
     ; depends : Depends.t
+    ; depends_ : Conditional_depends.t list
     ; depexts : string list
     ; info : Pkg_info.t
     ; exported_env : String_with_vars.t Action.Env_update.t list

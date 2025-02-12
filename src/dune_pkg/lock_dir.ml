@@ -137,21 +137,86 @@ module Depends = struct
   let encode t = Dune_lang.List (List.map t ~f:Depend.encode)
 end
 
+module Conditional_depends = struct
+  module Condition = struct
+    type t =
+      { os : string
+      ; arch : string
+      }
+
+    let equal { os; arch } t = String.equal os t.os && String.equal arch t.arch
+    let to_dyn { os; arch } = Dyn.record [ "os", Dyn.string os; "arch", Dyn.string arch ]
+
+    module Fields = struct
+      let os = "os"
+      let arch = "arch"
+    end
+
+    let decode =
+      let open Decoder in
+      enter
+      @@ fields
+      @@ let+ os = field Fields.os string
+         and+ arch = field Fields.arch string in
+         { os; arch }
+    ;;
+
+    let encode { os; arch } =
+      let open Encoder in
+      Dune_lang.List
+        (record_fields [ field Fields.os string os; field Fields.arch string arch ])
+    ;;
+  end
+
+  type t =
+    { condition : Condition.t
+    ; depends : Depends.t
+    }
+
+  let equal { condition; depends } t =
+    Condition.equal condition t.condition && Depends.equal depends t.depends
+  ;;
+
+  let remove_locs t = { t with depends = Depends.remove_locs t.depends }
+
+  let to_dyn { condition; depends } =
+    Dyn.record
+      [ "condition", Condition.to_dyn condition; "depends", Depends.to_dyn depends ]
+  ;;
+
+  let decode =
+    let open Decoder in
+    enter
+      (let+ condition = Condition.decode
+       and+ depends = Depends.decode in
+       { condition; depends })
+  ;;
+
+  let encode { condition; depends } =
+    Dune_lang.List [ Condition.encode condition; Depends.encode depends ]
+  ;;
+end
+
 module Pkg = struct
   type t =
     { build_command : Build_command.t option
     ; install_command : Action.t option
     ; depends : Depends.t
+    ; depends_ : Conditional_depends.t list
     ; depexts : string list
     ; info : Pkg_info.t
     ; exported_env : String_with_vars.t Action.Env_update.t list
     }
 
-  let equal { build_command; install_command; depends; depexts; info; exported_env } t =
+  let equal
+        { build_command; install_command; depends; depends_; depexts; info; exported_env }
+        t
+    =
     Option.equal Build_command.equal build_command t.build_command
     (* CR-rgrinberg: why do we ignore locations? *)
     && Option.equal Action.equal_no_locs install_command t.install_command
     && Depends.equal depends t.depends
+    && List.equal Conditional_depends.equal depends_ t.depends_
     && List.equal String.equal depexts t.depexts
     && Pkg_info.equal info t.info
     && List.equal
@@ -160,23 +225,28 @@ module Pkg = struct
          t.exported_env
   ;;
 
-  let remove_locs { build_command; install_command; depends; depexts; info; exported_env }
+  let remove_locs
+        { build_command; install_command; depends; depends_; depexts; info; exported_env }
     =
     { info = Pkg_info.remove_locs info
     ; exported_env =
         List.map exported_env ~f:(Action.Env_update.map ~f:String_with_vars.remove_locs)
     ; depends = Depends.remove_locs depends
+    ; depends_ = List.map depends_ ~f:Conditional_depends.remove_locs
     ; depexts
     ; build_command = Option.map build_command ~f:Build_command.remove_locs
     ; install_command = Option.map install_command ~f:Action.remove_locs
     }
   ;;
 
-  let to_dyn { build_command; install_command; depends; depexts; info; exported_env } =
+  let to_dyn
+        { build_command; install_command; depends; depends_; depexts; info; exported_env }
+    =
     Dyn.record
       [ "build_command", Dyn.option Build_command.to_dyn build_command
       ; "install_command", Dyn.option Action.to_dyn install_command
       ; "depends", Depends.to_dyn depends
+      ; "depends_", Dyn.list Conditional_depends.to_dyn depends_
       ; "depexts", Dyn.list String.to_dyn depexts
       ; "info", Pkg_info.to_dyn info
       ; ( "exported_env"
@@ -199,6 +269,7 @@ module Pkg = struct
     let version = "version"
     let install = "install"
     let depends = "depends"
+    let depends_ = "depends_"
     let depexts = "depexts"
     let source = "source"
     let dev = "dev"
@@ -214,6 +285,8 @@ module Pkg = struct
        and+ install_command = field_o Fields.install Action.decode_pkg
        and+ build_command = Build_command.decode
        and+ depends = field ~default:[] Fields.depends Depends.decode
+       and+ depends_ =
+         field ~default:[] Fields.depends_ (repeat Conditional_depends.decode)
        and+ depexts = field ~default:[] Fields.depexts (repeat string)
        and+ source = field_o Fields.source Source.decode
        and+ dev = field_b Fields.dev
@@ -239,7 +312,14 @@ module Pkg = struct
            in
            { Pkg_info.name; version; dev; source; extra_sources }
          in
-         { build_command; depends; depexts; install_command; info; exported_env }
+         { build_command
+         ; depends
+         ; depends_
+         ; depexts
+         ; install_command
+         ; info
+         ; exported_env
+         }
   ;;
 
   let encode_extra_source (local, source) : Dune_sexp.t =
@@ -253,6 +333,7 @@ module Pkg = struct
         { build_command
         ; install_command
         ; depends
+        ; depends_
         ; depexts
         ; info = { Pkg_info.name = _; extra_sources; version; dev; source }
         ; exported_env
@@ -264,6 +345,7 @@ module Pkg = struct
       ; field_o Fields.install Action.encode install_command
       ; Build_command.encode build_command
       ; field Fields.depends Depends.encode depends
+      ; field_l Fields.depends_ Conditional_depends.encode depends_
       ; field_l Fields.depexts string depexts
       ; field_o Fields.source Source.encode source
       ; field_b Fields.dev dev
