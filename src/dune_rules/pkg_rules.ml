@@ -1106,7 +1106,7 @@ end = struct
     | Some
         ({ Lock_dir.Pkg.build_command
          ; install_command
-         ; depends_ = _
+         ; depends = _
          ; info
          ; exported_env
          ; depexts

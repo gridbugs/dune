@@ -224,17 +224,17 @@ module Pkg = struct
   type t =
     { build_command : Build_command.t option
     ; install_command : Action.t option
-    ; depends_ : Conditional_depends.t list
+    ; depends : Conditional_depends.t list
     ; depexts : string list
     ; info : Pkg_info.t
     ; exported_env : String_with_vars.t Action.Env_update.t list
     }
 
-  let equal { build_command; install_command; depends_; depexts; info; exported_env } t =
+  let equal { build_command; install_command; depends; depexts; info; exported_env } t =
     Option.equal Build_command.equal build_command t.build_command
     (* CR-rgrinberg: why do we ignore locations? *)
     && Option.equal Action.equal_no_locs install_command t.install_command
-    && List.equal Conditional_depends.equal depends_ t.depends_
+    && List.equal Conditional_depends.equal depends t.depends
     && List.equal String.equal depexts t.depexts
     && Pkg_info.equal info t.info
     && List.equal
@@ -243,24 +243,23 @@ module Pkg = struct
          t.exported_env
   ;;
 
-  let remove_locs
-        { build_command; install_command; depends_; depexts; info; exported_env }
+  let remove_locs { build_command; install_command; depends; depexts; info; exported_env }
     =
     { info = Pkg_info.remove_locs info
     ; exported_env =
         List.map exported_env ~f:(Action.Env_update.map ~f:String_with_vars.remove_locs)
-    ; depends_ = List.map depends_ ~f:Conditional_depends.remove_locs
+    ; depends = List.map depends ~f:Conditional_depends.remove_locs
     ; depexts
     ; build_command = Option.map build_command ~f:Build_command.remove_locs
     ; install_command = Option.map install_command ~f:Action.remove_locs
     }
   ;;
 
-  let to_dyn { build_command; install_command; depends_; depexts; info; exported_env } =
+  let to_dyn { build_command; install_command; depends; depexts; info; exported_env } =
     Dyn.record
       [ "build_command", Dyn.option Build_command.to_dyn build_command
       ; "install_command", Dyn.option Action.to_dyn install_command
-      ; "depends_", Dyn.list Conditional_depends.to_dyn depends_
+      ; "depends", Dyn.list Conditional_depends.to_dyn depends
       ; "depexts", Dyn.list String.to_dyn depexts
       ; "info", Pkg_info.to_dyn info
       ; ( "exported_env"
@@ -282,7 +281,7 @@ module Pkg = struct
   module Fields = struct
     let version = "version"
     let install = "install"
-    let depends_ = "depends_"
+    let depends = "depends"
     let depexts = "depexts"
     let source = "source"
     let dev = "dev"
@@ -297,8 +296,7 @@ module Pkg = struct
     @@ let+ version = field Fields.version Package_version.decode
        and+ install_command = field_o Fields.install Action.decode_pkg
        and+ build_command = Build_command.decode
-       and+ depends_ =
-         field ~default:[] Fields.depends_ (repeat Conditional_depends.decode)
+       and+ depends = field ~default:[] Fields.depends (repeat Conditional_depends.decode)
        and+ depexts = field ~default:[] Fields.depexts (repeat string)
        and+ source = field_o Fields.source Source.decode
        and+ dev = field_b Fields.dev
@@ -324,7 +322,7 @@ module Pkg = struct
            in
            { Pkg_info.name; version; dev; source; extra_sources }
          in
-         { build_command; depends_; depexts; install_command; info; exported_env }
+         { build_command; depends; depexts; install_command; info; exported_env }
   ;;
 
   let encode_extra_source (local, source) : Dune_sexp.t =
@@ -337,7 +335,7 @@ module Pkg = struct
   let encode
         { build_command
         ; install_command
-        ; depends_
+        ; depends
         ; depexts
         ; info = { Pkg_info.name = _; extra_sources; version; dev; source }
         ; exported_env
@@ -348,7 +346,7 @@ module Pkg = struct
       [ field Fields.version Package_version.encode version
       ; field_o Fields.install Action.encode install_command
       ; Build_command.encode build_command
-      ; field_l Fields.depends_ Conditional_depends.encode depends_
+      ; field_l Fields.depends Conditional_depends.encode depends
       ; field_l Fields.depexts string depexts
       ; field_o Fields.source Source.encode source
       ; field_b Fields.dev dev
@@ -362,19 +360,19 @@ module Pkg = struct
   ;;
 
   let merge_conditionals a b =
-    let depends_ = a.depends_ @ b.depends_ in
+    let depends = a.depends @ b.depends in
     let condition_set =
-      List.map depends_ ~f:(fun { Conditional_depends.condition; _ } -> condition)
+      List.map depends ~f:(fun { Conditional_depends.condition; _ } -> condition)
       |> Conditional_depends.Condition.Set.of_list
     in
-    if List.length depends_ != Conditional_depends.Condition.Set.cardinal condition_set
+    if List.length depends != Conditional_depends.Condition.Set.cardinal condition_set
     then Code_error.raise "todo" [];
-    { a with depends_ }
+    { a with depends }
   ;;
 
   let depends_under_condition_exn t condition =
     match
-      List.find t.depends_ ~f:(fun conditional_depends ->
+      List.find t.depends ~f:(fun conditional_depends ->
         Conditional_depends.Condition.equal conditional_depends.condition condition)
     with
     | Some conditional_depends -> conditional_depends.depends
@@ -389,7 +387,7 @@ module Pkg = struct
   ;;
 
   let is_available_under_condition t condition =
-    List.exists t.depends_ ~f:(fun (conditional_depends : Conditional_depends.t) ->
+    List.exists t.depends ~f:(fun (conditional_depends : Conditional_depends.t) ->
       Conditional_depends.Condition.equal conditional_depends.condition condition)
   ;;
 end
@@ -492,7 +490,7 @@ let validate_packages packages =
   let missing_dependencies =
     Package_name.Map.values packages
     |> List.concat_map ~f:(fun (dependant_package : Pkg.t) ->
-      List.concat_map dependant_package.depends_ ~f:(fun depend ->
+      List.concat_map dependant_package.depends ~f:(fun depend ->
         List.filter_map depend.depends ~f:(fun depend ->
           (* CR-someday rgrinberg: do we need the dune check? aren't
            we supposed to filter these upfront? *)

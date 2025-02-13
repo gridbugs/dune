@@ -126,7 +126,7 @@ let%expect_test "encode/decode round trip test for lockdir with no deps" =
 let empty_package name ~version =
   { Lock_dir.Pkg.build_command = None
   ; install_command = None
-  ; depends_ = []
+  ; depends = []
   ; depexts = []
   ; info =
       { Lock_dir.Pkg_info.name; version; dev = false; source = None; extra_sources = [] }
@@ -246,7 +246,7 @@ let%expect_test "encode/decode round trip test for lockdir with complex deps" =
       , let pkg = empty_package name ~version:(Package_version.of_string "dev") in
         { pkg with
           install_command = None
-        ; depends_ =
+        ; depends =
             make_conditional_depends [ { Depend.loc = Loc.none; name = fst pkg_a } ]
         ; info =
             { pkg.info with
@@ -269,7 +269,7 @@ let%expect_test "encode/decode round trip test for lockdir with complex deps" =
       ( name
       , let pkg = empty_package name ~version:(Package_version.of_string "0.2") in
         { pkg with
-          depends_ =
+          depends =
             make_conditional_depends
               [ { Depend.loc = Loc.none; name = fst pkg_a }
               ; { Depend.loc = Loc.none; name = fst pkg_b }
@@ -323,7 +323,32 @@ let%expect_test "encode/decode round trip test for lockdir with complex deps" =
           ; "b" :
               { build_command = None
               ; install_command = None
-              ; depends = [ ("complex_lock_dir/b.pkg:3", "a") ]
+              ; depends =
+                  [ { condition = { os = "linux"; arch = "x86_64" }
+                    ; depends =
+                        [ { loc = "complex_lock_dir/b.pkg:6"; name = "a" } ]
+                    }
+                  ; { condition = { os = "linux"; arch = "arm64" }
+                    ; depends =
+                        [ { loc = "complex_lock_dir/b.pkg:9"; name = "a" } ]
+                    }
+                  ; { condition = { os = "macos"; arch = "x86_64" }
+                    ; depends =
+                        [ { loc = "complex_lock_dir/b.pkg:12"; name = "a" } ]
+                    }
+                  ; { condition = { os = "macos"; arch = "arm64" }
+                    ; depends =
+                        [ { loc = "complex_lock_dir/b.pkg:15"; name = "a" } ]
+                    }
+                  ; { condition = { os = "win32"; arch = "x86_64" }
+                    ; depends =
+                        [ { loc = "complex_lock_dir/b.pkg:18"; name = "a" } ]
+                    }
+                  ; { condition = { os = "win32"; arch = "arm64" }
+                    ; depends =
+                        [ { loc = "complex_lock_dir/b.pkg:21"; name = "a" } ]
+                    }
+                  ]
               ; depexts = []
               ; info =
                   { name = "b"
@@ -344,8 +369,42 @@ let%expect_test "encode/decode round trip test for lockdir with complex deps" =
               { build_command = None
               ; install_command = None
               ; depends =
-                  [ ("complex_lock_dir/c.pkg:3", "a")
-                  ; ("complex_lock_dir/c.pkg:3", "b")
+                  [ { condition = { os = "linux"; arch = "x86_64" }
+                    ; depends =
+                        [ { loc = "complex_lock_dir/c.pkg:6"; name = "a" }
+                        ; { loc = "complex_lock_dir/c.pkg:6"; name = "b" }
+                        ]
+                    }
+                  ; { condition = { os = "linux"; arch = "arm64" }
+                    ; depends =
+                        [ { loc = "complex_lock_dir/c.pkg:9"; name = "a" }
+                        ; { loc = "complex_lock_dir/c.pkg:9"; name = "b" }
+                        ]
+                    }
+                  ; { condition = { os = "macos"; arch = "x86_64" }
+                    ; depends =
+                        [ { loc = "complex_lock_dir/c.pkg:12"; name = "a" }
+                        ; { loc = "complex_lock_dir/c.pkg:12"; name = "b" }
+                        ]
+                    }
+                  ; { condition = { os = "macos"; arch = "arm64" }
+                    ; depends =
+                        [ { loc = "complex_lock_dir/c.pkg:15"; name = "a" }
+                        ; { loc = "complex_lock_dir/c.pkg:15"; name = "b" }
+                        ]
+                    }
+                  ; { condition = { os = "win32"; arch = "x86_64" }
+                    ; depends =
+                        [ { loc = "complex_lock_dir/c.pkg:18"; name = "a" }
+                        ; { loc = "complex_lock_dir/c.pkg:18"; name = "b" }
+                        ]
+                    }
+                  ; { condition = { os = "win32"; arch = "arm64" }
+                    ; depends =
+                        [ { loc = "complex_lock_dir/c.pkg:21"; name = "a" }
+                        ; { loc = "complex_lock_dir/c.pkg:21"; name = "b" }
+                        ]
+                    }
                   ]
               ; depexts = []
               ; info =

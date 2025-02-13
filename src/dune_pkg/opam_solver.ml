@@ -1796,7 +1796,7 @@ let opam_package_to_lock_file_pkg
     OpamFile.OPAM.env opam_file |> List.map ~f:opam_env_update_to_env_update
   in
   let kind = if opam_file_is_compiler opam_file then `Compiler else `Non_compiler in
-  let depends_ =
+  let depends =
     [ { Lock_dir.Conditional_depends.condition =
           Lock_dir.Conditional_depends.Condition.of_solver_env_exn solver_env
       ; depends
@@ -1804,7 +1804,7 @@ let opam_package_to_lock_file_pkg
     ]
   in
   ( kind
-  , { Lock_dir.Pkg.build_command; install_command; depends_; depexts; info; exported_env }
+  , { Lock_dir.Pkg.build_command; install_command; depends; depexts; info; exported_env }
   )
 ;;
 
@@ -1912,7 +1912,7 @@ let reject_unreachable_packages =
         | Some (pkg : Lock_dir.Pkg.t), None ->
           Some
             (List.concat_map
-               pkg.depends_
+               pkg.depends
                ~f:(fun (conditional_depends : Lock_dir.Conditional_depends.t) ->
                  List.map
                    conditional_depends.depends
@@ -2057,9 +2057,9 @@ let solve_lock_dir
       | Ok pkgs_by_name ->
         Package_name.Map.iter
           pkgs_by_name
-          ~f:(fun { Lock_dir.Pkg.depends_; info = { name; _ }; _ } ->
+          ~f:(fun { Lock_dir.Pkg.depends; info = { name; _ }; _ } ->
             List.iter
-              depends_
+              depends
               ~f:(fun (conditional_depends : Lock_dir.Conditional_depends.t) ->
                 List.iter
                   conditional_depends.depends

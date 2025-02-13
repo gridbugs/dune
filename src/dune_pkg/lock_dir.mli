@@ -52,7 +52,7 @@ module Pkg : sig
   type t =
     { build_command : Build_command.t option
     ; install_command : Action.t option
-    ; depends_ : Conditional_depends.t list
+    ; depends : Conditional_depends.t list
     ; depexts : string list
     ; info : Pkg_info.t
     ; exported_env : String_with_vars.t Action.Env_update.t list
