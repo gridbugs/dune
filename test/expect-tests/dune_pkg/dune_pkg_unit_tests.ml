@@ -3,6 +3,7 @@ module Checksum = Dune_pkg.Checksum
 module Lock_dir = Dune_pkg.Lock_dir
 module Depend = Dune_pkg.Lock_dir.Depend
 module Opam_repo = Dune_pkg.Opam_repo
+module Expanded_variable_bindings = Dune_pkg.Solver_stats.Expanded_variable_bindings
 module Package_variable_name = Dune_lang.Package_variable_name
 module Variable_value = Dune_pkg.Variable_value
 module Rev_store = Dune_pkg.Rev_store
@@ -110,7 +111,8 @@ let%expect_test "encode/decode round trip test for lockdir with no deps" =
          Package_name.Map.empty
          ~local_packages:[]
          ~ocaml:None
-         ~repos:None)
+         ~repos:None
+         ~expanded_solver_variable_bindings:Expanded_variable_bindings.empty)
     ();
   [%expect
     {|
@@ -120,6 +122,8 @@ let%expect_test "encode/decode round trip test for lockdir with no deps" =
     ; packages = map {}
     ; ocaml = None
     ; repos = { complete = true; used = None }
+    ; expanded_solver_variable_bindings =
+        { variable_values = []; unset_variables = [] }
     } |}]
 ;;
 
@@ -146,6 +150,11 @@ let%expect_test "encode/decode round trip test for lockdir with simple deps" =
          ~local_packages:[]
          ~ocaml:(Some (Loc.none, Package_name.of_string "ocaml"))
          ~repos:None
+         ~expanded_solver_variable_bindings:
+           { Expanded_variable_bindings.variable_values =
+               [ Package_variable_name.os, Variable_value.string "linux" ]
+           ; unset_variables = [ Package_variable_name.os_family ]
+           }
          (Package_name.Map.of_list_exn
             [ mk_pkg_basic ~name:"foo" ~version:(Package_version.of_string "0.1.0")
             ; mk_pkg_basic ~name:"bar" ~version:(Package_version.of_string "0.2.0")
@@ -189,6 +198,10 @@ let%expect_test "encode/decode round trip test for lockdir with simple deps" =
           }
     ; ocaml = Some ("simple_lock_dir/lock.dune:3", "ocaml")
     ; repos = { complete = true; used = None }
+    ; expanded_solver_variable_bindings =
+        { variable_values = [ ("os", "linux") ]
+        ; unset_variables = [ "os-family" ]
+        }
     }
     |}]
 ;;
@@ -293,6 +306,7 @@ let%expect_test "encode/decode round trip test for lockdir with complex deps" =
       ~local_packages:[]
       ~ocaml:(Some (Loc.none, Package_name.of_string "ocaml"))
       ~repos:(Some [ opam_repo ])
+      ~expanded_solver_variable_bindings:Expanded_variable_bindings.empty
       (Package_name.Map.of_list_exn [ pkg_a; pkg_b; pkg_c ])
   in
   lock_dir_encode_decode_round_trip_test ~lock_dir_path:"complex_lock_dir" ~lock_dir ();
@@ -423,6 +437,8 @@ let%expect_test "encode/decode round trip test for lockdir with complex deps" =
         { complete = true
         ; used = Some [ opam_repo_serializable "https://github.com/ocaml/dune" ]
         }
+    ; expanded_solver_variable_bindings =
+        { variable_values = []; unset_variables = [] }
     }
     |}]
 ;;
@@ -456,6 +472,7 @@ let%expect_test "encode/decode round trip test with locked repo revision" =
         ~local_packages:[]
         ~ocaml:(Some (Loc.none, Package_name.of_string "ocaml"))
         ~repos:(Some [ opam_repo ])
+        ~expanded_solver_variable_bindings:Expanded_variable_bindings.empty
         (Package_name.Map.of_list_exn [ pkg_a; pkg_b; pkg_c ])
     in
     lock_dir_encode_decode_round_trip_test
@@ -522,6 +539,8 @@ let%expect_test "encode/decode round trip test with locked repo revision" =
                   "https://github.com/ocaml/dune#MATCHES_EXPECTED"
               ]
         }
+    ; expanded_solver_variable_bindings =
+        { variable_values = []; unset_variables = [] }
     }
     |}]
 ;;

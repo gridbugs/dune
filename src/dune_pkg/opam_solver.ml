@@ -80,6 +80,7 @@ module Context = struct
     ; local_packages : local_package Package_name.Map.t Lazy.t
     ; solver_env : Solver_env.t
     ; dune_version : OpamPackage.Version.t
+    ; stats_updater : Solver_stats.Updater.t
     ; candidates_cache : (Package_name.t, candidates) Fiber_cache.t
     ; (* The solver can call this function several times on the same package.
          If the package contains an invalid "available" filter we want to print a
@@ -98,6 +99,7 @@ module Context = struct
         ~repos
         ~local_packages
         ~version_preference
+        ~stats_updater
         ~constraints
     =
     let candidates_cache = Fiber_cache.create (module Package_name) in
@@ -131,6 +133,7 @@ module Context = struct
     ; pinned_packages
     ; solver_env
     ; dune_version = Dune_dep.version
+    ; stats_updater
     ; candidates_cache
     ; available_cache
     ; constraints
@@ -159,7 +162,9 @@ module Context = struct
       let available = OpamFile.OPAM.available opam in
       match
         OpamFilter.partial_eval
-          (Solver_env.to_env t.solver_env |> add_self_to_filter_env package)
+          (Solver_env.to_env t.solver_env
+           |> Solver_stats.Updater.wrap_env t.stats_updater
+           |> add_self_to_filter_env package)
           available
         |> eval_to_bool
       with
@@ -222,6 +227,7 @@ module Context = struct
       |> Package_name.Map.mem (Lazy.force t.local_packages)
     in
     Solver_env.to_env t.solver_env
+    |> Solver_stats.Updater.wrap_env t.stats_updater
     |> add_self_to_filter_env package
     |> Resolve_opam_formula.apply_filter
          ~with_test:package_is_local
@@ -1648,6 +1654,7 @@ let resolve_depopts ~resolve depopts =
 
 let opam_package_to_lock_file_pkg
       solver_env
+      stats_updater
       version_by_package_name
       opam_package
       ~pinned_package_names
@@ -1737,7 +1744,11 @@ let opam_package_to_lock_file_pkg
     let portable_solver_env =
       Solver_env.unset_multi solver_env Package_variable_name.platform_specific
     in
-    fun variable_name -> Solver_env.get portable_solver_env variable_name
+    fun variable_name ->
+      let value = Solver_env.get portable_solver_env variable_name in
+      if Option.is_some value
+      then Solver_stats.Updater.expand_variable stats_updater variable_name;
+      value
   in
   let build_command =
     if Resolved_package.dune_build resolved_package
@@ -1966,6 +1977,7 @@ let solve_lock_dir
       ~constraints
   =
   let pinned_package_names = Package_name.Set.of_keys pinned_packages in
+  let stats_updater = Solver_stats.Updater.init () in
   let context =
     let rec context =
       lazy
@@ -1975,6 +1987,7 @@ let solve_lock_dir
            ~repos
            ~version_preference
            ~local_packages:local_packages'
+           ~stats_updater
            ~constraints)
     and local_packages' =
       lazy
@@ -2021,6 +2034,7 @@ let solve_lock_dir
         List.map opam_packages_to_lock ~f:(fun opam_package ->
           opam_package_to_lock_file_pkg
             solver_env
+            stats_updater
             version_by_package_name
             opam_package
             ~pinned_package_names
@@ -2055,6 +2069,12 @@ let solve_lock_dir
           "Solver selected multiple versions for the same package"
           [ "name", Package_name.to_dyn name ]
       | Ok pkgs_by_name ->
+        let expanded_solver_variable_bindings =
+          let stats = Solver_stats.Updater.snapshot stats_updater in
+          Solver_stats.Expanded_variable_bindings.of_variable_set
+            stats.expanded_variables
+            solver_env
+        in
         Package_name.Map.iter
           pkgs_by_name
           ~f:(fun { Lock_dir.Pkg.depends; info = { name; _ }; _ } ->
@@ -2092,6 +2112,7 @@ let solve_lock_dir
           ~local_packages:(Package_name.Map.values local_packages)
           ~ocaml
           ~repos:(Some repos)
+          ~expanded_solver_variable_bindings
     in
     let+ files =
       let resolved_packages =

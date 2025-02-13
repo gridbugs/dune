@@ -135,10 +135,6 @@ module List_locked_dependencies = struct
 
   let list_locked_dependencies ~transitive ~lock_dirs () =
     let open Fiber.O in
-    let* solver_env =
-      Dune_pkg.Sys_poll.make ~path:(Env_path.path Stdune.Env.initial)
-      |> Dune_pkg.Sys_poll.solver_env_from_current_system
-    in
     let+ lock_dirs_by_path, local_packages =
       let open Memo.O in
       Memo.both
@@ -151,8 +147,7 @@ module List_locked_dependencies = struct
         ~sep:Pp.cut
         (List.map lock_dirs_by_path ~f:(fun (lock_dir_path, lock_dir) ->
            let package_universe =
-             Package_universe.create local_packages lock_dir solver_env
-             |> User_error.ok_exn
+             Package_universe.create local_packages lock_dir |> User_error.ok_exn
            in
            Pp.vbox
              (Pp.concat
