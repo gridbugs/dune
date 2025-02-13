@@ -29,6 +29,10 @@ let enumerate_lock_dirs_by_path ~lock_dirs () =
 
 let validate_lock_dirs ~lock_dirs () =
   let open Fiber.O in
+  let* solver_env =
+    Dune_pkg.Sys_poll.make ~path:(Env_path.path Stdune.Env.initial)
+    |> Dune_pkg.Sys_poll.solver_env_from_current_system
+  in
   let+ lock_dirs_by_path, local_packages =
     Memo.both (enumerate_lock_dirs_by_path ~lock_dirs ()) Pkg_common.find_local_packages
     |> Memo.run
@@ -40,7 +44,7 @@ let validate_lock_dirs ~lock_dirs () =
       List.filter_map lock_dirs_by_path ~f:(function
         | Error e -> Some e
         | Ok (path, lock_dir) ->
-          (match Package_universe.create local_packages lock_dir with
+          (match Package_universe.create local_packages lock_dir solver_env with
            | Ok _ -> None
            | Error e -> Some (path, `Lock_dir_out_of_sync e)))
     with

@@ -8,6 +8,7 @@ type t
 val create
   :  Local_package.t Package_name.Map.t
   -> Lock_dir.t
+  -> Solver_env.t
   -> (t, User_message.t) result
 
 (** Verifies if the dependencies described in the project file are still

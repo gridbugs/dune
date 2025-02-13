@@ -223,13 +223,9 @@ let validate t =
   |> check_for_unnecessary_packges_in_lock_dir t.lock_dir
 ;;
 
-let create local_packages lock_dir =
+let create local_packages lock_dir solver_env =
   try
     let version_by_package_name = version_by_package_name local_packages lock_dir in
-    let solver_env =
-      Solver_stats.Expanded_variable_bindings.to_solver_env
-        lock_dir.expanded_solver_variable_bindings
-    in
     let t = { local_packages; lock_dir; version_by_package_name; solver_env } in
     validate t;
     Ok t

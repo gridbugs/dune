@@ -122,26 +122,12 @@ let get_path ctx =
   | Some (Opam _) -> Memo.return None
 ;;
 
-let get_workspace_lock_dir ctx =
-  let* workspace = Workspace.workspace () in
-  let+ path = get_path ctx >>| Option.value_exn in
-  Workspace.find_lock_dir workspace path
-;;
-
 let get_with_path ctx =
   let* path = get_path ctx >>| Option.value_exn in
   Load.load path
-  >>= function
-  | Error e -> Memo.return (Error e)
-  | Ok lock_dir ->
-    let+ workspace_lock_dir = get_workspace_lock_dir ctx in
-    (match workspace_lock_dir with
-     | None -> ()
-     | Some workspace_lock_dir ->
-       Solver_stats.Expanded_variable_bindings.validate_against_solver_env
-         lock_dir.expanded_solver_variable_bindings
-         (workspace_lock_dir.solver_env |> Option.value ~default:Solver_env.empty));
-    Ok (path, lock_dir)
+  >>| function
+  | Error e -> Error e
+  | Ok lock_dir -> Ok (path, lock_dir)
 ;;
 
 let get ctx = get_with_path ctx >>| Result.map ~f:snd

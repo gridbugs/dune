@@ -11,7 +11,6 @@ module Package_dependency = Package_dependency
 module Dependency_formula = Dependency_formula
 module Rev_store = Rev_store
 module Solver_env = Solver_env
-module Solver_stats = Solver_stats
 module Substs = Substs
 module Sys_poll = Sys_poll
 module Version_preference = Version_preference
