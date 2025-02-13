@@ -1808,7 +1808,8 @@ let opam_package_to_lock_file_pkg
   in
   let kind = if opam_file_is_compiler opam_file then `Compiler else `Non_compiler in
   let depends_ =
-    [ { Lock_dir.Conditional_depends.condition = { os = "linux"; arch = "x86_64" }
+    [ { Lock_dir.Conditional_depends.condition =
+          Lock_dir.Conditional_depends.Condition.of_solver_env_exn solver_env
       ; depends
       }
     ]
@@ -1864,6 +1865,24 @@ module Solver_result = struct
     ; pinned_packages : Package_name.Set.t
     ; num_expanded_packages : int
     }
+
+  let merge a b =
+    let lock_dir = Lock_dir.merge_conditionals a.lock_dir b.lock_dir in
+    let files =
+      Package_name.Map.merge a.files b.files ~f:(fun _ a b ->
+        match a, b with
+        | Some a, Some b ->
+          (* The package is present in both solutions. Make sure its associated
+             files are the same in both instances. *)
+          if not (List.equal File_entry.equal a b) then Code_error.raise "todo" [];
+          Some a
+        | Some x, None | None, Some x -> Some x
+        | None, None -> None)
+    in
+    let pinned_packages = Package_name.Set.union a.pinned_packages b.pinned_packages in
+    let num_expanded_packages = a.num_expanded_packages + b.num_expanded_packages in
+    { lock_dir; files; pinned_packages; num_expanded_packages }
+  ;;
 end
 
 let reject_unreachable_packages =

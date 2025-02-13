@@ -38,6 +38,8 @@ module Conditional_depends : sig
       { os : string
       ; arch : string
       }
+
+    val of_solver_env_exn : Solver_env.t -> t
   end
 
   type t =
@@ -154,3 +156,5 @@ val transitive_dependency_closure
 (** Attempt to download and compute checksums for packages that have source
     archive urls but no checksum. *)
 val compute_missing_checksums : t -> pinned_packages:Package_name.Set.t -> t Fiber.t
+
+val merge_conditionals : t -> t -> t

@@ -139,13 +139,27 @@ end
 
 module Conditional_depends = struct
   module Condition = struct
-    type t =
-      { os : string
-      ; arch : string
-      }
+    module T = struct
+      type t =
+        { os : string
+        ; arch : string
+        }
 
-    let equal { os; arch } t = String.equal os t.os && String.equal arch t.arch
-    let to_dyn { os; arch } = Dyn.record [ "os", Dyn.string os; "arch", Dyn.string arch ]
+      let equal { os; arch } t = String.equal os t.os && String.equal arch t.arch
+
+      let compare { os; arch } t =
+        let open Ordering.O in
+        let= () = String.compare os t.os in
+        String.compare arch t.arch
+      ;;
+
+      let to_dyn { os; arch } =
+        Dyn.record [ "os", Dyn.string os; "arch", Dyn.string arch ]
+      ;;
+    end
+
+    include T
+    include Comparable.Make (T)
 
     module Fields = struct
       let os = "os"
@@ -165,6 +179,15 @@ module Conditional_depends = struct
       let open Encoder in
       Dune_lang.List
         (record_fields [ field Fields.os string os; field Fields.arch string arch ])
+    ;;
+
+    let of_solver_env_exn solver_env =
+      let get name =
+        Solver_env.get solver_env name |> Option.value_exn |> Variable_value.to_string
+      in
+      let os = get Package_variable_name.os in
+      let arch = get Package_variable_name.arch in
+      { os; arch }
     ;;
   end
 
@@ -356,6 +379,17 @@ module Pkg = struct
 
   let files_dir package_name ~lock_dir =
     Path.Source.relative lock_dir (Package_name.to_string package_name ^ ".files")
+  ;;
+
+  let merge_conditionals a b =
+    let depends_ = a.depends_ @ b.depends_ in
+    let condition_set =
+      List.map depends_ ~f:(fun { Conditional_depends.condition; _ } -> condition)
+      |> Conditional_depends.Condition.Set.of_list
+    in
+    if List.length depends_ != Conditional_depends.Condition.Set.cardinal condition_set
+    then Code_error.raise "todo" [];
+    { a with depends_ }
   ;;
 end
 
@@ -1004,4 +1038,21 @@ let compute_missing_checksums t ~pinned_packages =
     >>| Package_name.Map.of_list_exn
   in
   { t with packages }
+;;
+
+let merge_conditionals a b =
+  let packages =
+    Package_name.Map.merge a.packages b.packages ~f:(fun _ a b ->
+      match a, b with
+      | Some a, Some b ->
+        (* The package exists in both lockdirs. *)
+        Some (Pkg.merge_conditionals a b)
+      | Some x, None | None, Some x ->
+        (* The package only exists in one of the lockdirs. *)
+        Some x
+      | None, None ->
+        (* unreachable *)
+        None)
+  in
+  { a with packages }
 ;;

@@ -26,3 +26,4 @@ val pp : t -> 'a Pp.t
 val unset_multi : t -> Package_variable_name.Set.t -> t
 
 val to_env : t -> OpamFilter.env
+val popular_platform_envs : t list

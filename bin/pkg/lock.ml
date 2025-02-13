@@ -66,6 +66,47 @@ let resolve_project_pins project_pins =
   Pin_stanza.resolve project_pins ~scan_project
 ;;
 
+let solve_multiple_envs
+      base_solver_env
+      version_preference
+      repos
+      ~pins
+      ~local_packages
+      ~constraints
+  =
+  let open Fiber.O in
+  let solve_for_env env =
+    Dune_pkg.Opam_solver.solve_lock_dir
+      env
+      version_preference
+      repos
+      ~pins
+      ~local_packages
+      ~constraints
+  in
+  let portable_solver_env =
+    (* TODO: make sure nothing system-specific sneaks into the environment here *)
+    Dune_pkg.Solver_env.unset_multi
+      base_solver_env
+      Dune_lang.Package_variable_name.platform_specific
+  in
+  let+ results =
+    Fiber.parallel_map Dune_pkg.Solver_env.popular_platform_envs ~f:(fun platform_env ->
+      let solver_env = Dune_pkg.Solver_env.extend portable_solver_env platform_env in
+      solve_for_env solver_env)
+  in
+  let results =
+    List.filter_map results ~f:(function
+      | Ok result -> Some result
+      | Error _ ->
+        (* TODO: error message *)
+        None)
+  in
+  match results with
+  | [] -> User_error.raise [ Pp.text "no solution found" ]
+  | x :: xs -> Ok (List.fold_left xs ~init:x ~f:Dune_pkg.Opam_solver.Solver_result.merge)
+;;
+
 let solve_lock_dir
       workspace
       ~local_packages
@@ -109,7 +150,7 @@ let solve_lock_dir
   let* pins = resolve_project_pins project_pins in
   let time_solve_start = Unix.gettimeofday () in
   progress_state := Some Progress_indicator.Per_lockdir.State.Solving;
-  Dune_pkg.Opam_solver.solve_lock_dir
+  solve_multiple_envs
     solver_env
     (Pkg_common.Version_preference.choose
        ~from_arg:version_preference
