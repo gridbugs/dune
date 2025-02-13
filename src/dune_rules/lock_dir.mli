@@ -21,6 +21,7 @@ module Sys_vars : sig
     }
 
   val poll : t
+  val condition_exn : unit -> Dune_pkg.Lock_dir.Conditional_depends.Condition.t Memo.t
 end
 
 val source_kind

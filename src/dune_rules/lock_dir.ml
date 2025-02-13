@@ -66,6 +66,14 @@ module Sys_vars = struct
                (Dune_sexp.Template.Pform.describe source)
            ])
   ;;
+
+  let condition_exn () =
+    let open Memo.O in
+    let get field = Memo.Lazy.force field >>| Option.value_exn in
+    let+ os = get poll.os
+    and+ arch = get poll.arch in
+    { Lock_dir.Conditional_depends.Condition.os; arch }
+  ;;
 end
 
 module Load = Make_load (struct

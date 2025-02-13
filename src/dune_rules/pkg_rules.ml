@@ -1062,8 +1062,12 @@ module DB = struct
 
   let get package_universe =
     let dune = Package.Name.Set.singleton (Package.Name.of_string "dune") in
-    let+ all = Package_universe.lock_dir package_universe in
-    { all = all.packages; system_provided = dune }
+    let+ all = Package_universe.lock_dir package_universe
+    and+ condition = Lock_dir.Sys_vars.condition_exn () in
+    let all_available_packages =
+      Dune_pkg.Lock_dir.packages_under_condition all condition
+    in
+    { all = all_available_packages; system_provided = dune }
   ;;
 end
 
@@ -1102,13 +1106,16 @@ end = struct
     | Some
         ({ Lock_dir.Pkg.build_command
          ; install_command
-         ; depends
          ; depends_ = _
          ; info
          ; exported_env
          ; depexts
          } as pkg) ->
       assert (Package.Name.equal name info.name);
+      let* depends =
+        Lock_dir.Sys_vars.condition_exn ()
+        >>| Dune_pkg.Lock_dir.Pkg.depends_under_condition_exn pkg
+      in
       let* depends =
         Memo.parallel_map depends ~f:(fun depend ->
           resolve db (depend.loc, depend.name) package_universe

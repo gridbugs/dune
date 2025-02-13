@@ -86,13 +86,16 @@ let all_non_local_dependencies_of_local_packages t =
 
 let check_for_unnecessary_packges_in_lock_dir
       lock_dir
+      solver_env
       all_non_local_dependencies_of_local_packages
   =
+  let condition = Lock_dir.Conditional_depends.Condition.of_solver_env_exn solver_env in
   let unneeded_packages_in_lock_dir =
     let locked_transitive_closure_of_local_package_dependencies =
       match
         Lock_dir.transitive_dependency_closure
           lock_dir
+          condition
           all_non_local_dependencies_of_local_packages
       with
       | Ok x -> x
@@ -220,7 +223,7 @@ let validate t =
     t.local_packages
     ~saved_dependency_hash:t.lock_dir.dependency_hash;
   all_non_local_dependencies_of_local_packages t
-  |> check_for_unnecessary_packges_in_lock_dir t.lock_dir
+  |> check_for_unnecessary_packges_in_lock_dir t.lock_dir t.solver_env
 ;;
 
 let create local_packages lock_dir solver_env =
@@ -266,9 +269,13 @@ let transitive_dependency_closure_without_test t start =
         in
         Package_name.Set.diff all_deps local_package_names)
     in
+    let condition =
+      Lock_dir.Conditional_depends.Condition.of_solver_env_exn t.solver_env
+    in
     match
       Lock_dir.transitive_dependency_closure
         t.lock_dir
+        condition
         Package_name.Set.(
           union
             non_local_immediate_dependencies_of_local_transitive_dependency_closure

@@ -52,7 +52,6 @@ module Pkg : sig
   type t =
     { build_command : Build_command.t option
     ; install_command : Action.t option
-    ; depends : Depends.t
     ; depends_ : Conditional_depends.t list
     ; depexts : string list
     ; info : Pkg_info.t
@@ -63,6 +62,7 @@ module Pkg : sig
   val equal : t -> t -> bool
   val decode : (lock_dir:Path.Source.t -> Package_name.t -> t) Decoder.t
   val files_dir : Package_name.t -> lock_dir:Path.Source.t -> Path.Source.t
+  val depends_under_condition_exn : t -> Conditional_depends.Condition.t -> Depends.t
 end
 
 module Package_filename : sig
@@ -144,6 +144,7 @@ end
     not present in the lockdir. *)
 val transitive_dependency_closure
   :  t
+  -> Conditional_depends.Condition.t
   -> Package_name.Set.t
   -> (Package_name.Set.t, [ `Missing_packages of Package_name.Set.t ]) result
 
@@ -152,3 +153,8 @@ val transitive_dependency_closure
 val compute_missing_checksums : t -> pinned_packages:Package_name.Set.t -> t Fiber.t
 
 val merge_conditionals : t -> t -> t
+
+val packages_under_condition
+  :  t
+  -> Conditional_depends.Condition.t
+  -> Pkg.t Package_name.Map.t
