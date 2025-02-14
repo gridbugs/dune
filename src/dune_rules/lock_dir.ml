@@ -69,10 +69,11 @@ module Sys_vars = struct
 
   let condition_exn () =
     let open Memo.O in
-    let get field = Memo.Lazy.force field >>| Option.value_exn in
-    let+ os = get poll.os
-    and+ arch = get poll.arch in
-    { Lock_dir.Condition.os; arch }
+    let get field = Memo.Lazy.force field in
+    let+ os = get poll.os >>| Option.value_exn
+    and+ arch = get poll.arch >>| Option.value_exn
+    and+ os_distribution = get poll.os_distribution in
+    { Lock_dir.Condition.os; arch; os_distribution }
   ;;
 end
 

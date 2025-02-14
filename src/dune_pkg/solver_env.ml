@@ -88,12 +88,30 @@ let to_env t variable =
 ;;
 
 let popular_platform_envs =
-  let make ~os ~arch =
+  let make ~os ~arch ~os_distribution =
     let env = empty in
     let env = set env Package_variable_name.os (Variable_value.string os) in
     let env = set env Package_variable_name.arch (Variable_value.string arch) in
+    let env =
+      match os_distribution with
+      | Some os_distribution ->
+        set
+          env
+          Package_variable_name.os_distribution
+          (Variable_value.string os_distribution)
+      | None -> env
+    in
     env
   in
-  List.concat_map [ "linux"; "macos"; "win32" ] ~f:(fun os ->
-    List.map [ "x86_64"; "arm64" ] ~f:(fun arch -> make ~os ~arch))
+  List.concat_map
+    (* Include distros with special cases in popular packages (such as the ocaml compiler). *)
+    [ "linux", [ "alpine" ]; "macos", []; "win32", [ "cygwin" ] ]
+    ~f:(fun (os, distros) ->
+      List.concat_map [ "x86_64"; "arm64" ] ~f:(fun arch ->
+        let distros =
+          (* Put the [None] case at the end of the list so that cases with
+             distros are tried first. *)
+          List.map distros ~f:Option.some @ [ None ]
+        in
+        List.map distros ~f:(fun os_distribution -> make ~os ~arch ~os_distribution)))
 ;;

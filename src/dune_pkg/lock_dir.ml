@@ -142,17 +142,43 @@ module Condition = struct
     type t =
       { os : string
       ; arch : string
+      ; os_distribution : string option
       }
 
-    let equal { os; arch } t = String.equal os t.os && String.equal arch t.arch
-
-    let compare { os; arch } t =
-      let open Ordering.O in
-      let= () = String.compare os t.os in
-      String.compare arch t.arch
+    let equal { os; arch; os_distribution } t =
+      String.equal os t.os
+      && String.equal arch t.arch
+      && Option.equal String.equal os_distribution t.os_distribution
     ;;
 
-    let to_dyn { os; arch } = Dyn.record [ "os", Dyn.string os; "arch", Dyn.string arch ]
+    let matches ~in_lock_dir ~from_system =
+      let option_equal_with_lhs_none_wildcard a b =
+        match a, b with
+        | Some a, Some b -> String.equal a b
+        | Some _, None -> false
+        | _ -> true
+      in
+      String.equal in_lock_dir.os from_system.os
+      && String.equal in_lock_dir.arch from_system.arch
+      && option_equal_with_lhs_none_wildcard
+           in_lock_dir.os_distribution
+           from_system.os_distribution
+    ;;
+
+    let compare { os; arch; os_distribution } t =
+      let open Ordering.O in
+      let= () = String.compare os t.os in
+      let= () = String.compare arch t.arch in
+      Option.compare String.compare os_distribution t.os_distribution
+    ;;
+
+    let to_dyn { os; arch; os_distribution } =
+      Dyn.record
+        [ "os", Dyn.string os
+        ; "arch", Dyn.string arch
+        ; "os_distribution", Dyn.option Dyn.string os_distribution
+        ]
+    ;;
   end
 
   include T
@@ -161,6 +187,7 @@ module Condition = struct
   module Fields = struct
     let os = "os"
     let arch = "arch"
+    let os_distribution = "os_distribution"
   end
 
   let decode =
@@ -168,23 +195,29 @@ module Condition = struct
     enter
     @@ fields
     @@ let+ os = field Fields.os string
-       and+ arch = field Fields.arch string in
-       { os; arch }
+       and+ arch = field Fields.arch string
+       and+ os_distribution = field_o Fields.os_distribution string in
+       { os; arch; os_distribution }
   ;;
 
-  let encode { os; arch } =
+  let encode { os; arch; os_distribution } =
     let open Encoder in
     Dune_lang.List
-      (record_fields [ field Fields.os string os; field Fields.arch string arch ])
+      (record_fields
+         [ field Fields.os string os
+         ; field Fields.arch string arch
+         ; field_o Fields.os_distribution string os_distribution
+         ])
   ;;
 
   let of_solver_env_exn solver_env =
     let get name =
-      Solver_env.get solver_env name |> Option.value_exn |> Variable_value.to_string
+      Solver_env.get solver_env name |> Option.map ~f:Variable_value.to_string
     in
-    let os = get Package_variable_name.os in
-    let arch = get Package_variable_name.arch in
-    { os; arch }
+    let os = get Package_variable_name.os |> Option.value_exn in
+    let arch = get Package_variable_name.arch |> Option.value_exn in
+    let os_distribution = get Package_variable_name.os_distribution in
+    { os; arch; os_distribution }
   ;;
 end
 
@@ -219,23 +252,56 @@ module Conditional = struct
   let map t ~f = { t with value = f t.value }
   let condition { condition; _ } = condition
   let get { value; _ } = value
-  let matches_condition t condition = Condition.equal t.condition condition
 
-  let find ts condition =
-    List.find_map ts ~f:(fun t ->
-      if matches_condition t condition then Some t.value else None)
+  let matches_condition t condition =
+    Condition.matches ~in_lock_dir:t.condition ~from_system:condition
+  ;;
+end
+
+module Conditional_choice = struct
+  type 'a t = 'a Conditional.t list
+
+  let equal value_equal = List.equal (Conditional.equal value_equal)
+  let map ~f = List.map ~f:(Conditional.map ~f)
+  let to_dyn value_to_dyn = Dyn.list (Conditional.to_dyn value_to_dyn)
+
+  let find t condition =
+    List.find_map t ~f:(fun conditional ->
+      if Conditional.matches_condition conditional condition
+      then Some (Conditional.get conditional)
+      else None)
   ;;
 
-  let condition_exists ts condition =
-    List.exists ts ~f:(fun t -> matches_condition t condition)
+  let condition_exists t condition =
+    List.exists t ~f:(fun conditional ->
+      Conditional.matches_condition conditional condition)
+  ;;
+
+  let decode_field field_name value_decode =
+    let open Decoder in
+    field ~default:[] field_name (repeat (Conditional.decode value_decode))
+  ;;
+
+  let encode_field field_name value_encode t =
+    Encoder.field_l field_name (Conditional.encode value_encode) t
+  ;;
+
+  let merge a b =
+    let merged = a @ b in
+    let condition_set =
+      List.map merged ~f:Conditional.condition |> Condition.Set.of_list
+    in
+    if List.length merged != Condition.Set.cardinal condition_set
+    then Code_error.raise "todo" [];
+    merged
   ;;
 end
 
 module Pkg = struct
   type t =
     { build_command : Build_command.t option
-    ; install_command : Action.t option
-    ; depends : Depends.t Conditional.t list
+    ; install_command : Action.t Conditional_choice.t
+    ; depends : Depends.t Conditional_choice.t
     ; depexts : string list
     ; info : Pkg_info.t
     ; exported_env : String_with_vars.t Action.Env_update.t list
@@ -244,8 +310,8 @@ module Pkg = struct
   let equal { build_command; install_command; depends; depexts; info; exported_env } t =
     Option.equal Build_command.equal build_command t.build_command
     (* CR-rgrinberg: why do we ignore locations? *)
-    && Option.equal Action.equal_no_locs install_command t.install_command
-    && List.equal (Conditional.equal Depends.equal) depends t.depends
+    && Conditional_choice.equal Action.equal_no_locs install_command t.install_command
+    && Conditional_choice.equal Depends.equal depends t.depends
     && List.equal String.equal depexts t.depexts
     && Pkg_info.equal info t.info
     && List.equal
@@ -259,18 +325,18 @@ module Pkg = struct
     { info = Pkg_info.remove_locs info
     ; exported_env =
         List.map exported_env ~f:(Action.Env_update.map ~f:String_with_vars.remove_locs)
-    ; depends = List.map depends ~f:(Conditional.map ~f:Depends.remove_locs)
+    ; depends = Conditional_choice.map depends ~f:Depends.remove_locs
     ; depexts
     ; build_command = Option.map build_command ~f:Build_command.remove_locs
-    ; install_command = Option.map install_command ~f:Action.remove_locs
+    ; install_command = Conditional_choice.map install_command ~f:Action.remove_locs
     }
   ;;
 
   let to_dyn { build_command; install_command; depends; depexts; info; exported_env } =
     Dyn.record
       [ "build_command", Dyn.option Build_command.to_dyn build_command
-      ; "install_command", Dyn.option Action.to_dyn install_command
-      ; "depends", Dyn.list (Conditional.to_dyn Depends.to_dyn) depends
+      ; "install_command", Conditional_choice.to_dyn Action.to_dyn install_command
+      ; "depends", Conditional_choice.to_dyn Depends.to_dyn depends
       ; "depexts", Dyn.list String.to_dyn depexts
       ; "info", Pkg_info.to_dyn info
       ; ( "exported_env"
@@ -305,10 +371,10 @@ module Pkg = struct
     enter
     @@ fields
     @@ let+ version = field Fields.version Package_version.decode
-       and+ install_command = field_o Fields.install Action.decode_pkg
+       and+ install_command =
+         Conditional_choice.decode_field Fields.install Action.decode_pkg
        and+ build_command = Build_command.decode
-       and+ depends =
-         field ~default:[] Fields.depends (repeat (Conditional.decode Depends.decode))
+       and+ depends = Conditional_choice.decode_field Fields.depends Depends.decode
        and+ depexts = field ~default:[] Fields.depexts (repeat string)
        and+ source = field_o Fields.source Source.decode
        and+ dev = field_b Fields.dev
@@ -356,9 +422,9 @@ module Pkg = struct
     let open Encoder in
     record_fields
       [ field Fields.version Package_version.encode version
-      ; field_o Fields.install Action.encode install_command
+      ; Conditional_choice.encode_field Fields.install Action.encode install_command
       ; Build_command.encode build_command
-      ; field_l Fields.depends (Conditional.encode Depends.encode) depends
+      ; Conditional_choice.encode_field Fields.depends Depends.encode depends
       ; field_l Fields.depexts string depexts
       ; field_o Fields.source Source.encode source
       ; field_b Fields.dev dev
@@ -372,17 +438,18 @@ module Pkg = struct
   ;;
 
   let merge_conditionals a b =
-    let depends = a.depends @ b.depends in
-    let condition_set =
-      List.map depends ~f:Conditional.condition |> Condition.Set.of_list
-    in
-    if List.length depends != Condition.Set.cardinal condition_set
-    then Code_error.raise "todo" [];
-    { a with depends }
+    let install_command = Conditional_choice.merge a.install_command b.install_command in
+    let depends = Conditional_choice.merge a.depends b.depends in
+    (* TODO make sure both packages are otherwise identical *)
+    { a with install_command; depends }
+  ;;
+
+  let install_command_under_condition t condition =
+    Conditional_choice.find t.install_command condition
   ;;
 
   let depends_under_condition_exn t condition =
-    match Conditional.find t.depends condition with
+    match Conditional_choice.find t.depends condition with
     | Some depends -> depends
     | None ->
       User_error.raise
@@ -395,7 +462,7 @@ module Pkg = struct
   ;;
 
   let is_available_under_condition t condition =
-    Conditional.condition_exists t.depends condition
+    Conditional_choice.condition_exists t.depends condition
   ;;
 end
 
@@ -1062,12 +1129,13 @@ let merge_conditionals a b =
         (* unreachable *)
         None)
   in
-  if
-    not
-      (equal
-         { a with packages = Package_name.Map.empty }
-         { b with packages = Package_name.Map.empty })
-  then Code_error.raise "todo" [];
+  let normalize t =
+    { t with
+      packages = Package_name.Map.empty
+    ; expanded_solver_variable_bindings = Solver_stats.Expanded_variable_bindings.empty
+    }
+  in
+  if not (equal (normalize a) (normalize b)) then Code_error.raise "todo" [];
   { a with packages }
 ;;
 

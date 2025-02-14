@@ -1105,16 +1105,16 @@ end = struct
     | None -> Memo.return None
     | Some
         ({ Lock_dir.Pkg.build_command
-         ; install_command
+         ; install_command = _
          ; depends = _
          ; info
          ; exported_env
          ; depexts
          } as pkg) ->
       assert (Package.Name.equal name info.name);
-      let* depends =
-        Lock_dir.Sys_vars.condition_exn ()
-        >>| Dune_pkg.Lock_dir.Pkg.depends_under_condition_exn pkg
+      let* lock_dir_condition = Lock_dir.Sys_vars.condition_exn () in
+      let depends =
+        Dune_pkg.Lock_dir.Pkg.depends_under_condition_exn pkg lock_dir_condition
       in
       let* depends =
         Memo.parallel_map depends ~f:(fun depend ->
@@ -1133,6 +1133,9 @@ end = struct
       in
       let id = Pkg.Id.gen () in
       let write_paths = Paths.make package_universe name ~relative:Path.Build.relative in
+      let install_command =
+        Lock_dir.Pkg.install_command_under_condition pkg lock_dir_condition
+      in
       let* paths, build_command, install_command =
         let paths = Paths.map_path write_paths ~f:Path.build in
         match Pkg_toolchain.is_compiler_and_toolchains_enabled info.name with

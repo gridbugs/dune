@@ -782,13 +782,13 @@ module Solver = struct
               candidates)
           in
           let+ () =
-            Fiber.parallel_iter !impls ~f:(fun { var = impl_var; impl } ->
+            Fiber.sequential_iter !impls ~f:(fun { var = impl_var; impl } ->
               Conflict_classes.process conflict_classes impl_var impl;
               match expand_deps with
               | `No_expand -> Fiber.return ()
               | `Expand_and_collect_conflicts deferred ->
                 Input.Impl.requires role impl
-                |> Fiber.parallel_iter ~f:(fun (dep : Input.dependency) ->
+                |> Fiber.sequential_iter ~f:(fun (dep : Input.dependency) ->
                   match dep.importance with
                   | Ensure -> process_dep expand_deps impl_var dep
                   | Prevent ->
@@ -850,7 +850,7 @@ module Solver = struct
            restricting dependencies are irrelevant to solving the dependency
            problem. *)
         List.rev !conflicts
-        |> Fiber.parallel_iter ~f:(fun (impl_var, dep) ->
+        |> Fiber.sequential_iter ~f:(fun (impl_var, dep) ->
           process_dep `No_expand impl_var dep)
         (* All impl_candidates have now been added, so snapshot the cache. *)
       in
@@ -1289,7 +1289,7 @@ module Solver = struct
             impl
         in
         Input.Role.Map.to_list impls
-        |> Fiber.parallel_map ~f:(fun (k, v) ->
+        |> Fiber.sequential_map ~f:(fun (k, v) ->
           let+ v = get_selected k v in
           k, v)
         |> Fiber.map ~f:Input.Role.Map.of_list_exn
@@ -1422,8 +1422,39 @@ let opam_variable_to_slang ~loc packages variable =
             Blang.Expr (convert_with_package_name package_name))))
 ;;
 
+(* Handles the special case for packages whose names contain '+' characters
+   where a special form of string interpolation is used. From the opam manual:
+   Warning: if the package name contains a + character (e.g. conf-g++), their
+   variables may only be accessed using opam 2.2 via string interpolation,
+   with the following syntax:
+
+     "%{?conf-g++:your-variable:}%"
+*)
+let desugar_special_string_interpolation_syntax
+      ((packages, variable, string_converter) as fident)
+  =
+  match string_converter with
+  | Some (package_and_variable, "")
+    when List.is_empty packages && OpamVariable.to_string variable |> String.is_empty ->
+    (match String.lsplit2 package_and_variable ~on:':' with
+     | Some (package, variable) ->
+       ( [ Some (OpamPackage.Name.of_string package) ]
+       , OpamVariable.of_string variable
+       , None )
+     | None -> fident)
+  | _ -> fident
+;;
+
 let opam_fident_to_slang ~loc fident =
-  let packages, variable, string_converter = OpamFilter.desugar_fident fident in
+  let packages, variable, string_converter =
+    OpamFilter.desugar_fident fident |> desugar_special_string_interpolation_syntax
+  in
+  print_endline (sprintf ">>> %s" (OpamVariable.to_string variable));
+  List.iter packages ~f:(function
+    | Some name -> print_endline (sprintf "package: %s" (OpamPackage.Name.to_string name))
+    | None -> ());
+  Option.iter string_converter ~f:(fun (l, r) ->
+    print_endline (sprintf "string_converter [%s...%s]" l r));
   let slang = opam_variable_to_slang ~loc packages variable in
   match string_converter with
   | None -> slang
@@ -1453,6 +1484,7 @@ let opam_string_to_slang ~package ~loc opam_string =
          when String.is_prefix ~prefix:"%{" interp && String.is_suffix ~suffix:"}%" interp
          ->
          let ident = String.sub ~pos:2 ~len:(String.length interp - 4) interp in
+         print_endline (sprintf "opam_string_to_slang %s" ident);
          opam_raw_fident_to_slang ~loc ident
        | other ->
          User_error.raise
@@ -1487,6 +1519,7 @@ let opam_string_to_slang ~package ~loc opam_string =
    semantics.
 *)
 let filter_to_blang ~package ~loc filter =
+  print_endline (sprintf "filter_to_blang %s" (OpamPackage.to_string package));
   let filter_to_slang (filter : OpamTypes.filter) =
     match filter with
     | FString s -> opam_string_to_slang ~package ~loc s
@@ -1788,20 +1821,20 @@ let opam_package_to_lock_file_pkg
       then OpamSysPkg.Set.to_list_map OpamSysPkg.to_string sys_pkgs
       else [])
   in
+  let lock_dir_condition = Lock_dir.Condition.of_solver_env_exn solver_env in
   let install_command =
     OpamFile.OPAM.install opam_file
     |> opam_commands_to_actions get_solver_var loc opam_package
     |> make_action
-    |> Option.map ~f:build_env
+    |> Option.map ~f:(fun action ->
+      Lock_dir.Conditional.make lock_dir_condition (build_env action))
+    |> Option.to_list
   in
   let exported_env =
     OpamFile.OPAM.env opam_file |> List.map ~f:opam_env_update_to_env_update
   in
   let kind = if opam_file_is_compiler opam_file then `Compiler else `Non_compiler in
-  let depends =
-    [ Lock_dir.Conditional.make (Lock_dir.Condition.of_solver_env_exn solver_env) depends
-    ]
-  in
+  let depends = [ Lock_dir.Conditional.make lock_dir_condition depends ] in
   ( kind
   , { Lock_dir.Pkg.build_command; install_command; depends; depexts; info; exported_env }
   )
