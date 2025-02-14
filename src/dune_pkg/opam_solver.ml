@@ -1449,12 +1449,6 @@ let opam_fident_to_slang ~loc fident =
   let packages, variable, string_converter =
     OpamFilter.desugar_fident fident |> desugar_special_string_interpolation_syntax
   in
-  print_endline (sprintf ">>> %s" (OpamVariable.to_string variable));
-  List.iter packages ~f:(function
-    | Some name -> print_endline (sprintf "package: %s" (OpamPackage.Name.to_string name))
-    | None -> ());
-  Option.iter string_converter ~f:(fun (l, r) ->
-    print_endline (sprintf "string_converter [%s...%s]" l r));
   let slang = opam_variable_to_slang ~loc packages variable in
   match string_converter with
   | None -> slang
@@ -1484,7 +1478,6 @@ let opam_string_to_slang ~package ~loc opam_string =
          when String.is_prefix ~prefix:"%{" interp && String.is_suffix ~suffix:"}%" interp
          ->
          let ident = String.sub ~pos:2 ~len:(String.length interp - 4) interp in
-         print_endline (sprintf "opam_string_to_slang %s" ident);
          opam_raw_fident_to_slang ~loc ident
        | other ->
          User_error.raise
@@ -1519,7 +1512,6 @@ let opam_string_to_slang ~package ~loc opam_string =
    semantics.
 *)
 let filter_to_blang ~package ~loc filter =
-  print_endline (sprintf "filter_to_blang %s" (OpamPackage.to_string package));
   let filter_to_slang (filter : OpamTypes.filter) =
     match filter with
     | FString s -> opam_string_to_slang ~package ~loc s
@@ -1813,6 +1805,11 @@ let opam_package_to_lock_file_pkg
       |> Option.map ~f:build_env
       |> Option.map ~f:(fun action -> Lock_dir.Build_command.Action action))
   in
+  let lock_dir_condition = Lock_dir.Condition.of_solver_env_exn solver_env in
+  let build_command =
+    Option.map build_command ~f:(Lock_dir.Conditional.make lock_dir_condition)
+    |> Option.to_list
+  in
   let depexts =
     OpamFile.OPAM.depexts opam_file
     |> List.concat_map ~f:(fun (sys_pkgs, filter) ->
@@ -1821,7 +1818,6 @@ let opam_package_to_lock_file_pkg
       then OpamSysPkg.Set.to_list_map OpamSysPkg.to_string sys_pkgs
       else [])
   in
-  let lock_dir_condition = Lock_dir.Condition.of_solver_env_exn solver_env in
   let install_command =
     OpamFile.OPAM.install opam_file
     |> opam_commands_to_actions get_solver_var loc opam_package

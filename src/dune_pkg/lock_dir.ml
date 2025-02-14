@@ -75,28 +75,31 @@ module Build_command = struct
 
   module Fields = struct
     let dune = "dune"
-    let build = "build"
+    let action = "action"
   end
 
   let encode t =
     let open Encoder in
-    match t with
-    | None -> field_o Fields.build Encoder.unit None
-    | Some Dune -> field_b Fields.dune true
-    | Some (Action a) -> field Fields.build Action.encode a
+    Dune_lang.List
+      (record_fields
+         [ (match t with
+            | Dune -> field_b Fields.dune true
+            | Action a -> field Fields.action Action.encode a)
+         ])
   ;;
 
   let decode =
     let open Decoder in
-    fields_mutually_exclusive
-      ~default:None
-      [ ( Fields.build
-        , let+ pkg = Action.decode_pkg in
-          Some (Action pkg) )
-      ; ( Fields.dune
-        , let+ () = return () in
-          Some Dune )
-      ]
+    enter
+    @@ fields
+    @@ fields_mutually_exclusive
+         [ ( Fields.action
+           , let+ pkg = Action.decode_pkg in
+             Action pkg )
+         ; ( Fields.dune
+           , let+ () = return () in
+             Dune )
+         ]
   ;;
 end
 
@@ -299,7 +302,7 @@ end
 
 module Pkg = struct
   type t =
-    { build_command : Build_command.t option
+    { build_command : Build_command.t Conditional_choice.t
     ; install_command : Action.t Conditional_choice.t
     ; depends : Depends.t Conditional_choice.t
     ; depexts : string list
@@ -308,7 +311,7 @@ module Pkg = struct
     }
 
   let equal { build_command; install_command; depends; depexts; info; exported_env } t =
-    Option.equal Build_command.equal build_command t.build_command
+    Conditional_choice.equal Build_command.equal build_command t.build_command
     (* CR-rgrinberg: why do we ignore locations? *)
     && Conditional_choice.equal Action.equal_no_locs install_command t.install_command
     && Conditional_choice.equal Depends.equal depends t.depends
@@ -327,14 +330,14 @@ module Pkg = struct
         List.map exported_env ~f:(Action.Env_update.map ~f:String_with_vars.remove_locs)
     ; depends = Conditional_choice.map depends ~f:Depends.remove_locs
     ; depexts
-    ; build_command = Option.map build_command ~f:Build_command.remove_locs
+    ; build_command = Conditional_choice.map build_command ~f:Build_command.remove_locs
     ; install_command = Conditional_choice.map install_command ~f:Action.remove_locs
     }
   ;;
 
   let to_dyn { build_command; install_command; depends; depexts; info; exported_env } =
     Dyn.record
-      [ "build_command", Dyn.option Build_command.to_dyn build_command
+      [ "build_command", Conditional_choice.to_dyn Build_command.to_dyn build_command
       ; "install_command", Conditional_choice.to_dyn Action.to_dyn install_command
       ; "depends", Conditional_choice.to_dyn Depends.to_dyn depends
       ; "depexts", Dyn.list String.to_dyn depexts
@@ -357,6 +360,7 @@ module Pkg = struct
 
   module Fields = struct
     let version = "version"
+    let build = "build"
     let install = "install"
     let depends = "depends"
     let depexts = "depexts"
@@ -373,7 +377,8 @@ module Pkg = struct
     @@ let+ version = field Fields.version Package_version.decode
        and+ install_command =
          Conditional_choice.decode_field Fields.install Action.decode_pkg
-       and+ build_command = Build_command.decode
+       and+ build_command =
+         Conditional_choice.decode_field Fields.build Build_command.decode
        and+ depends = Conditional_choice.decode_field Fields.depends Depends.decode
        and+ depexts = field ~default:[] Fields.depexts (repeat string)
        and+ source = field_o Fields.source Source.decode
@@ -423,7 +428,7 @@ module Pkg = struct
     record_fields
       [ field Fields.version Package_version.encode version
       ; Conditional_choice.encode_field Fields.install Action.encode install_command
-      ; Build_command.encode build_command
+      ; Conditional_choice.encode_field Fields.build Build_command.encode build_command
       ; Conditional_choice.encode_field Fields.depends Depends.encode depends
       ; field_l Fields.depexts string depexts
       ; field_o Fields.source Source.encode source
@@ -438,14 +443,19 @@ module Pkg = struct
   ;;
 
   let merge_conditionals a b =
+    let build_command = Conditional_choice.merge a.build_command b.build_command in
     let install_command = Conditional_choice.merge a.install_command b.install_command in
     let depends = Conditional_choice.merge a.depends b.depends in
     (* TODO make sure both packages are otherwise identical *)
-    { a with install_command; depends }
+    { a with build_command; install_command; depends }
   ;;
 
   let install_command_under_condition t condition =
     Conditional_choice.find t.install_command condition
+  ;;
+
+  let build_command_under_condition t condition =
+    Conditional_choice.find t.build_command condition
   ;;
 
   let depends_under_condition_exn t condition =

@@ -128,7 +128,7 @@ let%expect_test "encode/decode round trip test for lockdir with no deps" =
 ;;
 
 let empty_package name ~version =
-  { Lock_dir.Pkg.build_command = None
+  { Lock_dir.Pkg.build_command = []
   ; install_command = []
   ; depends = []
   ; depexts = []
@@ -224,8 +224,8 @@ let%expect_test "encode/decode round trip test for lockdir with complex deps" =
       , let pkg = empty_package name ~version:(Package_version.of_string "0.1.0") in
         { pkg with
           build_command =
-            Some
-              (Action
+            make_conditional
+              (Lock_dir.Build_command.Action
                  Action.(Progn [ Echo [ String_with_vars.make_text Loc.none "hello" ] ]))
         ; install_command =
             make_conditional

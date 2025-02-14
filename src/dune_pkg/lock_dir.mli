@@ -51,7 +51,7 @@ end
 
 module Pkg : sig
   type t =
-    { build_command : Build_command.t option
+    { build_command : Build_command.t Conditional.t list
     ; install_command : Action.t Conditional.t list
     ; depends : Depends.t Conditional.t list
     ; depexts : string list
@@ -65,6 +65,7 @@ module Pkg : sig
   val files_dir : Package_name.t -> lock_dir:Path.Source.t -> Path.Source.t
   val depends_under_condition_exn : t -> Condition.t -> Depends.t
   val install_command_under_condition : t -> Condition.t -> Action.t option
+  val build_command_under_condition : t -> Condition.t -> Build_command.t option
 end
 
 module Package_filename : sig

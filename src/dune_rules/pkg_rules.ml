@@ -1104,7 +1104,7 @@ end = struct
     match Package.Name.Map.find db.all name with
     | None -> Memo.return None
     | Some
-        ({ Lock_dir.Pkg.build_command
+        ({ Lock_dir.Pkg.build_command = _
          ; install_command = _
          ; depends = _
          ; info
@@ -1135,6 +1135,9 @@ end = struct
       let write_paths = Paths.make package_universe name ~relative:Path.Build.relative in
       let install_command =
         Lock_dir.Pkg.install_command_under_condition pkg lock_dir_condition
+      in
+      let build_command =
+        Lock_dir.Pkg.build_command_under_condition pkg lock_dir_condition
       in
       let* paths, build_command, install_command =
         let paths = Paths.map_path write_paths ~f:Path.build in
