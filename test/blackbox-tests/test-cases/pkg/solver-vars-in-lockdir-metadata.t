@@ -140,18 +140,11 @@ stored in the lockdir metadata:
   (version 0.0.1)
   
   (install
-   (when
-    (= %{arch} arm)
-    (run echo qux)))
+   (run echo qux))
   
   (build
    (progn
-    (when
-     (= %{os} linux)
-     (run echo foo))
-    (when
-     (= %{os} macos)
-     (run echo bar))
+    (run echo foo)
     (run echo baz)))
   $ cat dune.lock/lock.dune
   (lang package 0.1)
@@ -161,3 +154,9 @@ stored in the lockdir metadata:
   (repositories
    (complete false)
    (used))
+  
+  (expanded_solver_variable_bindings
+   (variable_values
+    (os linux)
+    (arch arm))
+   (unset_variables x))
