@@ -211,8 +211,8 @@ let%expect_test "encode/decode round trip test for lockdir with complex deps" =
   let module String_with_vars = Dune_lang.String_with_vars in
   let make_conditional_depends depends =
     Dune_pkg.Solver_env.popular_platform_envs
-    |> List.map ~f:Lock_dir.Conditional_depends.Condition.of_solver_env_exn
-    |> List.map ~f:(fun condition -> { Lock_dir.Conditional_depends.condition; depends })
+    |> List.map ~f:Lock_dir.Condition.of_solver_env_exn
+    |> List.map ~f:(fun condition -> Lock_dir.Conditional.make condition depends)
   in
   let lock_dir =
     let pkg_a =

@@ -72,7 +72,7 @@ module Sys_vars = struct
     let get field = Memo.Lazy.force field >>| Option.value_exn in
     let+ os = get poll.os
     and+ arch = get poll.arch in
-    { Lock_dir.Conditional_depends.Condition.os; arch }
+    { Lock_dir.Condition.os; arch }
   ;;
 end
 

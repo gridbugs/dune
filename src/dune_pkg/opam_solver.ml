@@ -1808,10 +1808,7 @@ let opam_package_to_lock_file_pkg
   in
   let kind = if opam_file_is_compiler opam_file then `Compiler else `Non_compiler in
   let depends =
-    [ { Lock_dir.Conditional_depends.condition =
-          Lock_dir.Conditional_depends.Condition.of_solver_env_exn solver_env
-      ; depends
-      }
+    [ Lock_dir.Conditional.make (Lock_dir.Condition.of_solver_env_exn solver_env) depends
     ]
   in
   ( kind
@@ -1922,12 +1919,10 @@ let reject_unreachable_packages =
             [ "name", Package_name.to_dyn name ]
         | Some (pkg : Lock_dir.Pkg.t), None ->
           Some
-            (List.concat_map
-               pkg.depends
-               ~f:(fun (conditional_depends : Lock_dir.Conditional_depends.t) ->
-                 List.map
-                   conditional_depends.depends
-                   ~f:(fun (depend : Lock_dir.Depend.t) -> depend.name)))
+            (List.concat_map pkg.depends ~f:(fun conditional_depends ->
+               List.map
+                 (Lock_dir.Conditional.get conditional_depends)
+                 ~f:(fun (depend : Lock_dir.Depend.t) -> depend.name)))
         | None, Some (pkg : Local_package.For_solver.t) ->
           let deps =
             match
@@ -2078,24 +2073,22 @@ let solve_lock_dir
         Package_name.Map.iter
           pkgs_by_name
           ~f:(fun { Lock_dir.Pkg.depends; info = { name; _ }; _ } ->
-            List.iter
-              depends
-              ~f:(fun (conditional_depends : Lock_dir.Conditional_depends.t) ->
-                List.iter
-                  conditional_depends.depends
-                  ~f:(fun (depend : Lock_dir.Depend.t) ->
-                    if Package_name.Map.mem local_packages depend.name
-                    then
-                      User_error.raise
-                        ~loc:depend.loc
-                        [ Pp.textf
-                            "Dune does not support packages outside the workspace \
-                             depending on packages in the workspace. The package %S is \
-                             not in the workspace but it depends on the package %S which \
-                             is in the workspace."
-                            (Package_name.to_string name)
-                            (Package_name.to_string depend.name)
-                        ])));
+            List.iter depends ~f:(fun conditional_depends ->
+              List.iter
+                (Lock_dir.Conditional.get conditional_depends)
+                ~f:(fun (depend : Lock_dir.Depend.t) ->
+                  if Package_name.Map.mem local_packages depend.name
+                  then
+                    User_error.raise
+                      ~loc:depend.loc
+                      [ Pp.textf
+                          "Dune does not support packages outside the workspace \
+                           depending on packages in the workspace. The package %S is not \
+                           in the workspace but it depends on the package %S which is in \
+                           the workspace."
+                          (Package_name.to_string name)
+                          (Package_name.to_string depend.name)
+                      ])));
         let pkgs_by_name =
           let reachable =
             reject_unreachable_packages

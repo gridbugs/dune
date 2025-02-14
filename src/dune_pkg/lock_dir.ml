@@ -137,86 +137,97 @@ module Depends = struct
   let encode t = Dune_lang.List (List.map t ~f:Depend.encode)
 end
 
-module Conditional_depends = struct
-  module Condition = struct
-    module T = struct
-      type t =
-        { os : string
-        ; arch : string
-        }
+module Condition = struct
+  module T = struct
+    type t =
+      { os : string
+      ; arch : string
+      }
 
-      let equal { os; arch } t = String.equal os t.os && String.equal arch t.arch
+    let equal { os; arch } t = String.equal os t.os && String.equal arch t.arch
 
-      let compare { os; arch } t =
-        let open Ordering.O in
-        let= () = String.compare os t.os in
-        String.compare arch t.arch
-      ;;
-
-      let to_dyn { os; arch } =
-        Dyn.record [ "os", Dyn.string os; "arch", Dyn.string arch ]
-      ;;
-    end
-
-    include T
-    include Comparable.Make (T)
-
-    module Fields = struct
-      let os = "os"
-      let arch = "arch"
-    end
-
-    let decode =
-      let open Decoder in
-      enter
-      @@ fields
-      @@ let+ os = field Fields.os string
-         and+ arch = field Fields.arch string in
-         { os; arch }
+    let compare { os; arch } t =
+      let open Ordering.O in
+      let= () = String.compare os t.os in
+      String.compare arch t.arch
     ;;
 
-    let encode { os; arch } =
-      let open Encoder in
-      Dune_lang.List
-        (record_fields [ field Fields.os string os; field Fields.arch string arch ])
-    ;;
-
-    let of_solver_env_exn solver_env =
-      let get name =
-        Solver_env.get solver_env name |> Option.value_exn |> Variable_value.to_string
-      in
-      let os = get Package_variable_name.os in
-      let arch = get Package_variable_name.arch in
-      { os; arch }
-    ;;
+    let to_dyn { os; arch } = Dyn.record [ "os", Dyn.string os; "arch", Dyn.string arch ]
   end
 
-  type t =
-    { condition : Condition.t
-    ; depends : Depends.t
-    }
+  include T
+  include Comparable.Make (T)
 
-  let equal { condition; depends } t =
-    Condition.equal condition t.condition && Depends.equal depends t.depends
-  ;;
-
-  let remove_locs t = { t with depends = Depends.remove_locs t.depends }
-
-  let to_dyn { condition; depends } =
-    Dyn.record
-      [ "condition", Condition.to_dyn condition; "depends", Depends.to_dyn depends ]
-  ;;
+  module Fields = struct
+    let os = "os"
+    let arch = "arch"
+  end
 
   let decode =
     let open Decoder in
     enter
-      (let+ condition = Condition.decode
-       and+ depends = Depends.decode in
-       { condition; depends })
+    @@ fields
+    @@ let+ os = field Fields.os string
+       and+ arch = field Fields.arch string in
+       { os; arch }
   ;;
 
-  let encode { condition; depends } =
-    Dune_lang.List [ Condition.encode condition; Depends.encode depends ]
+  let encode { os; arch } =
+    let open Encoder in
+    Dune_lang.List
+      (record_fields [ field Fields.os string os; field Fields.arch string arch ])
+  ;;
+
+  let of_solver_env_exn solver_env =
+    let get name =
+      Solver_env.get solver_env name |> Option.value_exn |> Variable_value.to_string
+    in
+    let os = get Package_variable_name.os in
+    let arch = get Package_variable_name.arch in
+    { os; arch }
+  ;;
+end
+
+module Conditional = struct
+  type 'a t =
+    { condition : Condition.t
+    ; value : 'a
+    }
+
+  let make condition value = { condition; value }
+
+  let equal value_equal { condition; value } t =
+    Condition.equal condition t.condition && value_equal value t.value
+  ;;
+
+  let to_dyn value_to_dyn { condition; value } =
+    Dyn.record [ "condition", Condition.to_dyn condition; "value", value_to_dyn value ]
+  ;;
+
+  let decode value_decode =
+    let open Decoder in
+    enter
+      (let+ condition = Condition.decode
+       and+ value = value_decode in
+       { condition; value })
+  ;;
+
+  let encode value_encode { condition; value } =
+    Dune_lang.List [ Condition.encode condition; value_encode value ]
+  ;;
+
+  let map t ~f = { t with value = f t.value }
+  let condition { condition; _ } = condition
+  let get { value; _ } = value
+  let matches_condition t condition = Condition.equal t.condition condition
+
+  let find ts condition =
+    List.find_map ts ~f:(fun t ->
+      if matches_condition t condition then Some t.value else None)
+  ;;
+
+  let condition_exists ts condition =
+    List.exists ts ~f:(fun t -> matches_condition t condition)
   ;;
 end
 
@@ -224,7 +235,7 @@ module Pkg = struct
   type t =
     { build_command : Build_command.t option
     ; install_command : Action.t option
-    ; depends : Conditional_depends.t list
+    ; depends : Depends.t Conditional.t list
     ; depexts : string list
     ; info : Pkg_info.t
     ; exported_env : String_with_vars.t Action.Env_update.t list
@@ -234,7 +245,7 @@ module Pkg = struct
     Option.equal Build_command.equal build_command t.build_command
     (* CR-rgrinberg: why do we ignore locations? *)
     && Option.equal Action.equal_no_locs install_command t.install_command
-    && List.equal Conditional_depends.equal depends t.depends
+    && List.equal (Conditional.equal Depends.equal) depends t.depends
     && List.equal String.equal depexts t.depexts
     && Pkg_info.equal info t.info
     && List.equal
@@ -248,7 +259,7 @@ module Pkg = struct
     { info = Pkg_info.remove_locs info
     ; exported_env =
         List.map exported_env ~f:(Action.Env_update.map ~f:String_with_vars.remove_locs)
-    ; depends = List.map depends ~f:Conditional_depends.remove_locs
+    ; depends = List.map depends ~f:(Conditional.map ~f:Depends.remove_locs)
     ; depexts
     ; build_command = Option.map build_command ~f:Build_command.remove_locs
     ; install_command = Option.map install_command ~f:Action.remove_locs
@@ -259,7 +270,7 @@ module Pkg = struct
     Dyn.record
       [ "build_command", Dyn.option Build_command.to_dyn build_command
       ; "install_command", Dyn.option Action.to_dyn install_command
-      ; "depends", Dyn.list Conditional_depends.to_dyn depends
+      ; "depends", Dyn.list (Conditional.to_dyn Depends.to_dyn) depends
       ; "depexts", Dyn.list String.to_dyn depexts
       ; "info", Pkg_info.to_dyn info
       ; ( "exported_env"
@@ -296,7 +307,8 @@ module Pkg = struct
     @@ let+ version = field Fields.version Package_version.decode
        and+ install_command = field_o Fields.install Action.decode_pkg
        and+ build_command = Build_command.decode
-       and+ depends = field ~default:[] Fields.depends (repeat Conditional_depends.decode)
+       and+ depends =
+         field ~default:[] Fields.depends (repeat (Conditional.decode Depends.decode))
        and+ depexts = field ~default:[] Fields.depexts (repeat string)
        and+ source = field_o Fields.source Source.decode
        and+ dev = field_b Fields.dev
@@ -346,7 +358,7 @@ module Pkg = struct
       [ field Fields.version Package_version.encode version
       ; field_o Fields.install Action.encode install_command
       ; Build_command.encode build_command
-      ; field_l Fields.depends Conditional_depends.encode depends
+      ; field_l Fields.depends (Conditional.encode Depends.encode) depends
       ; field_l Fields.depexts string depexts
       ; field_o Fields.source Source.encode source
       ; field_b Fields.dev dev
@@ -362,20 +374,16 @@ module Pkg = struct
   let merge_conditionals a b =
     let depends = a.depends @ b.depends in
     let condition_set =
-      List.map depends ~f:(fun { Conditional_depends.condition; _ } -> condition)
-      |> Conditional_depends.Condition.Set.of_list
+      List.map depends ~f:Conditional.condition |> Condition.Set.of_list
     in
-    if List.length depends != Conditional_depends.Condition.Set.cardinal condition_set
+    if List.length depends != Condition.Set.cardinal condition_set
     then Code_error.raise "todo" [];
     { a with depends }
   ;;
 
   let depends_under_condition_exn t condition =
-    match
-      List.find t.depends ~f:(fun conditional_depends ->
-        Conditional_depends.Condition.equal conditional_depends.condition condition)
-    with
-    | Some conditional_depends -> conditional_depends.depends
+    match Conditional.find t.depends condition with
+    | Some depends -> depends
     | None ->
       User_error.raise
         [ Pp.textf
@@ -387,8 +395,7 @@ module Pkg = struct
   ;;
 
   let is_available_under_condition t condition =
-    List.exists t.depends ~f:(fun (conditional_depends : Conditional_depends.t) ->
-      Conditional_depends.Condition.equal conditional_depends.condition condition)
+    Conditional.condition_exists t.depends condition
   ;;
 end
 
@@ -513,8 +520,8 @@ let validate_packages packages =
   let missing_dependencies =
     Package_name.Map.values packages
     |> List.concat_map ~f:(fun (dependant_package : Pkg.t) ->
-      List.concat_map dependant_package.depends ~f:(fun depend ->
-        List.filter_map depend.depends ~f:(fun depend ->
+      List.concat_map dependant_package.depends ~f:(fun conditional_depends ->
+        List.filter_map conditional_depends.value ~f:(fun depend ->
           (* CR-someday rgrinberg: do we need the dune check? aren't
            we supposed to filter these upfront? *)
           if

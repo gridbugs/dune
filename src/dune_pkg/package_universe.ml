@@ -89,7 +89,7 @@ let check_for_unnecessary_packges_in_lock_dir
       solver_env
       all_non_local_dependencies_of_local_packages
   =
-  let condition = Lock_dir.Conditional_depends.Condition.of_solver_env_exn solver_env in
+  let condition = Lock_dir.Condition.of_solver_env_exn solver_env in
   let unneeded_packages_in_lock_dir =
     let locked_transitive_closure_of_local_package_dependencies =
       match
@@ -273,9 +273,7 @@ let transitive_dependency_closure_without_test t start =
         in
         Package_name.Set.diff all_deps local_package_names)
     in
-    let condition =
-      Lock_dir.Conditional_depends.Condition.of_solver_env_exn t.solver_env
-    in
+    let condition = Lock_dir.Condition.of_solver_env_exn t.solver_env in
     match
       Lock_dir.transitive_dependency_closure
         t.lock_dir
