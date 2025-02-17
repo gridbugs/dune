@@ -140,144 +140,76 @@ module Depends = struct
   let encode t = Dune_lang.List (List.map t ~f:Depend.encode)
 end
 
-module Condition = struct
-  module T = struct
-    type t =
-      { os : string
-      ; arch : string
-      ; os_distribution : string option
-      }
-
-    let equal { os; arch; os_distribution } t =
-      String.equal os t.os
-      && String.equal arch t.arch
-      && Option.equal String.equal os_distribution t.os_distribution
-    ;;
-
-    let matches ~in_lock_dir ~from_system =
-      let option_equal_with_lhs_none_wildcard a b =
-        match a, b with
-        | Some a, Some b -> String.equal a b
-        | Some _, None -> false
-        | _ -> true
-      in
-      String.equal in_lock_dir.os from_system.os
-      && String.equal in_lock_dir.arch from_system.arch
-      && option_equal_with_lhs_none_wildcard
-           in_lock_dir.os_distribution
-           from_system.os_distribution
-    ;;
-
-    let compare { os; arch; os_distribution } t =
-      let open Ordering.O in
-      let= () = String.compare os t.os in
-      let= () = String.compare arch t.arch in
-      Option.compare String.compare os_distribution t.os_distribution
-    ;;
-
-    let to_dyn { os; arch; os_distribution } =
-      Dyn.record
-        [ "os", Dyn.string os
-        ; "arch", Dyn.string arch
-        ; "os_distribution", Dyn.option Dyn.string os_distribution
-        ]
-    ;;
-  end
-
-  include T
-  include Comparable.Make (T)
-
-  module Fields = struct
-    let os = "os"
-    let arch = "arch"
-    let os_distribution = "os_distribution"
-  end
-
-  let decode =
-    let open Decoder in
-    enter
-    @@ fields
-    @@ let+ os = field Fields.os string
-       and+ arch = field Fields.arch string
-       and+ os_distribution = field_o Fields.os_distribution string in
-       { os; arch; os_distribution }
-  ;;
-
-  let encode { os; arch; os_distribution } =
-    let open Encoder in
-    Dune_lang.List
-      (record_fields
-         [ field Fields.os string os
-         ; field Fields.arch string arch
-         ; field_o Fields.os_distribution string os_distribution
-         ])
-  ;;
-
-  let of_solver_env_exn solver_env =
-    let get name =
-      Solver_env.get solver_env name |> Option.map ~f:Variable_value.to_string
-    in
-    let os = get Package_variable_name.os |> Option.value_exn in
-    let arch = get Package_variable_name.arch |> Option.value_exn in
-    let os_distribution = get Package_variable_name.os_distribution in
-    { os; arch; os_distribution }
-  ;;
-end
-
 module Conditional = struct
   type 'a t =
-    { condition : Condition.t
+    { condition : Solver_env.t
     ; value : 'a
     }
 
-  let make condition value = { condition; value }
+  let make condition value =
+    let condition = Solver_env.retain condition Package_variable_name.platform_specific in
+    { condition; value }
+  ;;
 
   let equal value_equal { condition; value } t =
-    Condition.equal condition t.condition && value_equal value t.value
+    Solver_env.equal condition t.condition && value_equal value t.value
   ;;
 
   let to_dyn value_to_dyn { condition; value } =
-    Dyn.record [ "condition", Condition.to_dyn condition; "value", value_to_dyn value ]
+    Dyn.record [ "condition", Solver_env.to_dyn condition; "value", value_to_dyn value ]
   ;;
 
   let decode value_decode =
     let open Decoder in
     enter
-      (let+ condition = Condition.decode
+      (let+ condition = enter Solver_env.decode
        and+ value = value_decode in
        { condition; value })
   ;;
 
   let encode value_encode { condition; value } =
-    Dune_lang.List [ Condition.encode condition; value_encode value ]
+    Dune_lang.List [ Solver_env.encode condition; value_encode value ]
   ;;
 
   let map t ~f = { t with value = f t.value }
   let condition { condition; _ } = condition
   let get { value; _ } = value
 
-  let matches_condition t condition =
-    Condition.matches ~in_lock_dir:t.condition ~from_system:condition
+  let matches t ~query =
+    Solver_env.fold t.condition ~init:true ~f:(fun variable stored_value acc ->
+      acc
+      &&
+      match Solver_env.get query variable with
+      | None ->
+        (* The stored env has a field missing from the query. Don't match in this case. *)
+        false
+      | Some query_value -> Variable_value.equal query_value stored_value)
   ;;
 end
 
 module Conditional_choice = struct
   type 'a t = 'a Conditional.t list
 
+  let empty = []
+  let singleton condition value = [ Conditional.make condition value ]
+
+  let of_list ls =
+    List.map ls ~f:(fun (condition, value) -> Conditional.make condition value)
+  ;;
+
   let equal value_equal = List.equal (Conditional.equal value_equal)
   let map ~f = List.map ~f:(Conditional.map ~f)
   let to_dyn value_to_dyn = Dyn.list (Conditional.to_dyn value_to_dyn)
 
-  let find t condition =
+  let find t query =
     List.find_map t ~f:(fun conditional ->
-      if Conditional.matches_condition conditional condition
+      if Conditional.matches conditional ~query
       then Some (Conditional.get conditional)
       else None)
   ;;
 
-  let condition_exists t condition =
-    List.exists t ~f:(fun conditional ->
-      Conditional.matches_condition conditional condition)
+  let condition_exists t query =
+    List.exists t ~f:(fun conditional -> Conditional.matches conditional ~query)
   ;;
 
   let decode_field field_name value_decode =
@@ -292,9 +224,9 @@ module Conditional_choice = struct
   let merge a b =
     let merged = a @ b in
     let condition_set =
-      List.map merged ~f:Conditional.condition |> Condition.Set.of_list
+      List.map merged ~f:Conditional.condition |> Solver_env.Set.of_list
     in
-    if List.length merged != Condition.Set.cardinal condition_set
+    if List.length merged != Solver_env.Set.cardinal condition_set
     then Code_error.raise "todo" [];
     merged
   ;;
@@ -448,27 +380,6 @@ module Pkg = struct
     let depends = Conditional_choice.merge a.depends b.depends in
     (* TODO make sure both packages are otherwise identical *)
     { a with build_command; install_command; depends }
-  ;;
-
-  let install_command_under_condition t condition =
-    Conditional_choice.find t.install_command condition
-  ;;
-
-  let build_command_under_condition t condition =
-    Conditional_choice.find t.build_command condition
-  ;;
-
-  let depends_under_condition_exn t condition =
-    match Conditional_choice.find t.depends condition with
-    | Some depends -> depends
-    | None ->
-      User_error.raise
-        [ Pp.textf
-            "Unable to find dependecies of %s under condition:"
-            (Package_name.to_string t.info.name)
-        ; Pp.textf " - os: %s" condition.os
-        ; Pp.textf " - arch: %s" condition.arch
-        ]
   ;;
 
   let is_available_under_condition t condition =
@@ -1102,7 +1013,16 @@ let transitive_dependency_closure t condition start =
             diff
               (of_list_map
                  (let pkg = Package_name.Map.find_exn t.packages node in
-                  Pkg.depends_under_condition_exn pkg condition)
+                  match Conditional_choice.find pkg.depends condition with
+                  | Some depends -> depends
+                  | None ->
+                    User_error.raise
+                      [ Pp.textf
+                          "Lockfile does not contain dependencies for %s under the \
+                           condition"
+                          (Package_name.to_string pkg.info.name)
+                      ; Solver_env.pp condition
+                      ])
                  ~f:(fun depend -> depend.name))
               seen)
         in

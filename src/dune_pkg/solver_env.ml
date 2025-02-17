@@ -1,11 +1,19 @@
 open Import
 
-type t = Variable_value.t Package_variable_name.Map.t
+module T = struct
+  type t = Variable_value.t Package_variable_name.Map.t
+
+  let to_dyn = Package_variable_name.Map.to_dyn Variable_value.to_dyn
+  let equal = Package_variable_name.Map.equal ~equal:Variable_value.equal
+  let compare = Package_variable_name.Map.compare ~compare:Variable_value.compare
+end
+
+include T
+include Comparable.Make (T)
 
 let empty = Package_variable_name.Map.empty
-let equal = Package_variable_name.Map.equal ~equal:Variable_value.equal
-let to_dyn = Package_variable_name.Map.to_dyn Variable_value.to_dyn
 let is_empty = Package_variable_name.Map.is_empty
+let fold = Package_variable_name.Map.foldi
 
 let validate t ~loc =
   if Package_variable_name.Map.mem t Package_variable_name.with_test
@@ -18,6 +26,12 @@ let validate t ~loc =
           Package_variable_name.(to_string with_test)
           Package_variable_name.(to_string with_test)
       ]
+;;
+
+let encode t =
+  let open Encoder in
+  Package_variable_name.Map.to_list t
+  |> list (pair Package_variable_name.encode Variable_value.encode)
 ;;
 
 let decode =
@@ -75,6 +89,13 @@ let unset = Package_variable_name.Map.remove
 let unset_multi t variable_names =
   Package_variable_name.Set.fold variable_names ~init:t ~f:(fun variable_name t ->
     unset t variable_name)
+;;
+
+let retain t variable_names =
+  fold t ~init:t ~f:(fun variable_name _value acc ->
+    if Package_variable_name.Set.mem variable_names variable_name
+    then acc
+    else unset acc variable_name)
 ;;
 
 let to_env t variable =

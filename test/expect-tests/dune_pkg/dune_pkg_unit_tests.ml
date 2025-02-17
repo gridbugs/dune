@@ -128,9 +128,9 @@ let%expect_test "encode/decode round trip test for lockdir with no deps" =
 ;;
 
 let empty_package name ~version =
-  { Lock_dir.Pkg.build_command = []
-  ; install_command = []
-  ; depends = []
+  { Lock_dir.Pkg.build_command = Lock_dir.Conditional_choice.empty
+  ; install_command = Lock_dir.Conditional_choice.empty
+  ; depends = Lock_dir.Conditional_choice.empty
   ; depexts = []
   ; info =
       { Lock_dir.Pkg_info.name; version; dev = false; source = None; extra_sources = [] }
@@ -211,8 +211,8 @@ let%expect_test "encode/decode round trip test for lockdir with complex deps" =
   let module String_with_vars = Dune_lang.String_with_vars in
   let make_conditional value =
     Dune_pkg.Solver_env.popular_platform_envs
-    |> List.map ~f:Lock_dir.Condition.of_solver_env_exn
-    |> List.map ~f:(fun condition -> Lock_dir.Conditional.make condition value)
+    |> List.map ~f:(fun condition -> condition, value)
+    |> Lock_dir.Conditional_choice.of_list
   in
   let lock_dir =
     let pkg_a =
@@ -258,7 +258,7 @@ let%expect_test "encode/decode round trip test for lockdir with complex deps" =
       ( name
       , let pkg = empty_package name ~version:(Package_version.of_string "dev") in
         { pkg with
-          install_command = []
+          install_command = Lock_dir.Conditional_choice.empty
         ; depends = make_conditional [ { Depend.loc = Loc.none; name = fst pkg_a } ]
         ; info =
             { pkg.info with

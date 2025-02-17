@@ -1063,9 +1063,9 @@ module DB = struct
   let get package_universe =
     let dune = Package.Name.Set.singleton (Package.Name.of_string "dune") in
     let+ all = Package_universe.lock_dir package_universe
-    and+ condition = Lock_dir.Sys_vars.condition_exn () in
+    and+ solver_env = Lock_dir.Sys_vars.solver_env () in
     let all_available_packages =
-      Dune_pkg.Lock_dir.packages_under_condition all condition
+      Dune_pkg.Lock_dir.packages_under_condition all solver_env
     in
     { all = all_available_packages; system_provided = dune }
   ;;
@@ -1112,9 +1112,17 @@ end = struct
          ; depexts
          } as pkg) ->
       assert (Package.Name.equal name info.name);
-      let* lock_dir_condition = Lock_dir.Sys_vars.condition_exn () in
+      let* solver_env = Lock_dir.Sys_vars.solver_env () in
       let depends =
-        Dune_pkg.Lock_dir.Pkg.depends_under_condition_exn pkg lock_dir_condition
+        match Dune_pkg.Lock_dir.Conditional_choice.find pkg.depends solver_env with
+        | Some depends -> depends
+        | None ->
+          User_error.raise
+            [ Pp.textf
+                "Lockfile does not contain dependencies for %s under the condition"
+                (Dune_pkg.Package_name.to_string pkg.info.name)
+            ; Dune_pkg.Solver_env.pp solver_env
+            ]
       in
       let* depends =
         Memo.parallel_map depends ~f:(fun depend ->
@@ -1134,10 +1142,10 @@ end = struct
       let id = Pkg.Id.gen () in
       let write_paths = Paths.make package_universe name ~relative:Path.Build.relative in
       let install_command =
-        Lock_dir.Pkg.install_command_under_condition pkg lock_dir_condition
+        Dune_pkg.Lock_dir.Conditional_choice.find pkg.install_command solver_env
       in
       let build_command =
-        Lock_dir.Pkg.build_command_under_condition pkg lock_dir_condition
+        Dune_pkg.Lock_dir.Conditional_choice.find pkg.build_command solver_env
       in
       let* paths, build_command, install_command =
         let paths = Paths.map_path write_paths ~f:Path.build in

@@ -28,32 +28,24 @@ module Depend : sig
     }
 end
 
-module Depends : sig
-  type t = Depend.t list
-end
-
-module Condition : sig
-  type t =
-    { os : string
-    ; arch : string
-    ; os_distribution : string option
-    }
-
-  val of_solver_env_exn : Solver_env.t -> t
-end
-
-module Conditional : sig
+module Conditional_choice : sig
+  (** A sequence of values, each conditional on an environment. *)
   type 'a t
 
-  val make : Condition.t -> 'a -> 'a t
-  val get : 'a t -> 'a
+  val empty : 'a t
+  val singleton : Solver_env.t -> 'a -> 'a t
+  val of_list : (Solver_env.t * 'a) list -> 'a t
+
+  (** Returns the first value whose associated environment is a subset of the
+      specified environment. *)
+  val find : 'a t -> Solver_env.t -> 'a option
 end
 
 module Pkg : sig
   type t =
-    { build_command : Build_command.t Conditional.t list
-    ; install_command : Action.t Conditional.t list
-    ; depends : Depends.t Conditional.t list
+    { build_command : Build_command.t Conditional_choice.t
+    ; install_command : Action.t Conditional_choice.t
+    ; depends : Depend.t list Conditional_choice.t
     ; depexts : string list
     ; info : Pkg_info.t
     ; exported_env : String_with_vars.t Action.Env_update.t list
@@ -63,9 +55,6 @@ module Pkg : sig
   val equal : t -> t -> bool
   val decode : (lock_dir:Path.Source.t -> Package_name.t -> t) Decoder.t
   val files_dir : Package_name.t -> lock_dir:Path.Source.t -> Path.Source.t
-  val depends_under_condition_exn : t -> Condition.t -> Depends.t
-  val install_command_under_condition : t -> Condition.t -> Action.t option
-  val build_command_under_condition : t -> Condition.t -> Build_command.t option
 end
 
 module Package_filename : sig
@@ -153,7 +142,7 @@ end
     not present in the lockdir. *)
 val transitive_dependency_closure
   :  t
-  -> Condition.t
+  -> Solver_env.t
   -> Package_name.Set.t
   -> (Package_name.Set.t, [ `Missing_packages of Package_name.Set.t ]) result
 
@@ -162,4 +151,4 @@ val transitive_dependency_closure
 val compute_missing_checksums : t -> pinned_packages:Package_name.Set.t -> t Fiber.t
 
 val merge_conditionals : t -> t -> t
-val packages_under_condition : t -> Condition.t -> Pkg.t Package_name.Map.t
+val packages_under_condition : t -> Solver_env.t -> Pkg.t Package_name.Map.t
