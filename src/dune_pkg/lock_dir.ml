@@ -649,6 +649,7 @@ module Metadata = Dune_sexp.Versioned_file.Make (Unit)
 let () = Metadata.Lang.register Dune_lang.Pkg.syntax ()
 
 let encode_metadata
+      ~portable
       { version
       ; dependency_hash
       ; ocaml
@@ -681,7 +682,9 @@ let encode_metadata
      | Some ocaml -> [ list sexp [ string "ocaml"; Package_name.encode (snd ocaml) ] ])
   @ [ list sexp (string "repositories" :: Repositories.encode repos) ]
   @
-  if Solver_stats.Expanded_variable_bindings.is_empty expanded_solver_variable_bindings
+  if
+    portable
+    || Solver_stats.Expanded_variable_bindings.is_empty expanded_solver_variable_bindings
   then []
   else
     [ list
@@ -720,7 +723,7 @@ module Package_filename = struct
 end
 
 let file_contents_by_path ~portable t =
-  (metadata_filename, encode_metadata t)
+  (metadata_filename, encode_metadata ~portable t)
   :: (Package_name.Map.to_list t.packages
       |> List.map ~f:(fun (name, pkg) ->
         Package_filename.of_package_name name, Pkg.encode ~portable pkg))

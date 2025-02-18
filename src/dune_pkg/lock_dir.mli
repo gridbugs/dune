@@ -19,6 +19,8 @@ module Build_command : sig
   type t =
     | Action of Action.t
     | Dune (** pinned dune packages do not need to define a command *)
+
+  val to_dyn : t -> Dyn.t
 end
 
 module Depend : sig
