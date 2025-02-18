@@ -26,6 +26,8 @@ module Depend : sig
     { loc : Loc.t
     ; name : Package_name.t
     }
+
+  val to_dyn : t -> Dyn.t
 end
 
 module Conditional_choice : sig
@@ -34,7 +36,7 @@ module Conditional_choice : sig
 
   val empty : 'a t
   val singleton : Solver_env.t -> 'a -> 'a t
-  val of_list : (Solver_env.t * 'a) list -> 'a t
+  val singleton_all_platforms : 'a -> 'a t
 
   (** Returns the first value whose associated environment is a subset of the
       specified environment. *)
@@ -112,7 +114,8 @@ module Write_disk : sig
   type t
 
   val prepare
-    :  lock_dir_path:Path.Source.t
+    :  portable:bool
+    -> lock_dir_path:Path.Source.t
     -> files:File_entry.t Package_name.Map.Multi.t
     -> lock_dir
     -> t

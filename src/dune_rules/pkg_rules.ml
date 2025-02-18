@@ -1104,9 +1104,9 @@ end = struct
     match Package.Name.Map.find db.all name with
     | None -> Memo.return None
     | Some
-        ({ Lock_dir.Pkg.build_command = _
-         ; install_command = _
-         ; depends = _
+        ({ Lock_dir.Pkg.build_command
+         ; install_command
+         ; depends
          ; info
          ; exported_env
          ; depexts
@@ -1114,7 +1114,7 @@ end = struct
       assert (Package.Name.equal name info.name);
       let* solver_env = Lock_dir.Sys_vars.solver_env () in
       let depends =
-        match Dune_pkg.Lock_dir.Conditional_choice.find pkg.depends solver_env with
+        match Dune_pkg.Lock_dir.Conditional_choice.find depends solver_env with
         | Some depends -> depends
         | None ->
           User_error.raise
@@ -1142,10 +1142,10 @@ end = struct
       let id = Pkg.Id.gen () in
       let write_paths = Paths.make package_universe name ~relative:Path.Build.relative in
       let install_command =
-        Dune_pkg.Lock_dir.Conditional_choice.find pkg.install_command solver_env
+        Dune_pkg.Lock_dir.Conditional_choice.find install_command solver_env
       in
       let build_command =
-        Dune_pkg.Lock_dir.Conditional_choice.find pkg.build_command solver_env
+        Dune_pkg.Lock_dir.Conditional_choice.find build_command solver_env
       in
       let* paths, build_command, install_command =
         let paths = Paths.map_path write_paths ~f:Path.build in

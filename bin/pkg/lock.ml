@@ -217,7 +217,13 @@ let solve_lock_dir
     in
     progress_state := None;
     let+ lock_dir = Lock_dir.compute_missing_checksums ~pinned_packages lock_dir in
-    Ok (Lock_dir.Write_disk.prepare ~lock_dir_path ~files lock_dir, summary_message)
+    Ok
+      ( Lock_dir.Write_disk.prepare
+          ~portable:portable_lock_dir
+          ~lock_dir_path
+          ~files
+          lock_dir
+      , summary_message )
 ;;
 
 let solve
@@ -321,7 +327,12 @@ let term =
   let builder = Common.Builder.forbid_builds builder in
   let common, config = Common.init builder in
   Scheduler.go ~common ~config (fun () ->
-    lock ~version_preference ~lock_dirs_arg ~print_perf_stats ~portable_lock_dir:true)
+    let portable_lock_dir =
+      match Dune_rules.Setup.portable_lock_dir with
+      | `Enabled -> true
+      | `Disabled -> false
+    in
+    lock ~version_preference ~lock_dirs_arg ~print_perf_stats ~portable_lock_dir)
 ;;
 
 let info =

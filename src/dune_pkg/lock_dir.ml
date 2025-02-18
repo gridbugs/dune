@@ -1,5 +1,106 @@
 open Import
 
+module Conditional = struct
+  type 'a t =
+    { condition : Solver_env.t
+    ; value : 'a
+    }
+
+  let make condition value =
+    let condition = Solver_env.retain condition Package_variable_name.platform_specific in
+    { condition; value }
+  ;;
+
+  let equal value_equal { condition; value } t =
+    Solver_env.equal condition t.condition && value_equal value t.value
+  ;;
+
+  let to_dyn value_to_dyn { condition; value } =
+    Dyn.record [ "condition", Solver_env.to_dyn condition; "value", value_to_dyn value ]
+  ;;
+
+  let decode value_decode =
+    let open Decoder in
+    enter
+      (let+ condition = enter Solver_env.decode
+       and+ value = value_decode in
+       { condition; value })
+  ;;
+
+  let encode value_encode { condition; value } =
+    Dune_lang.List [ Solver_env.encode condition; value_encode value ]
+  ;;
+
+  let map t ~f = { t with value = f t.value }
+  let condition { condition; _ } = condition
+  let get { value; _ } = value
+
+  let matches t ~query =
+    Solver_env.fold t.condition ~init:true ~f:(fun variable stored_value acc ->
+      acc
+      &&
+      match Solver_env.get query variable with
+      | None ->
+        (* The stored env has a field missing from the query. Don't match in this case. *)
+        false
+      | Some query_value -> Variable_value.equal query_value stored_value)
+  ;;
+end
+
+module Conditional_choice = struct
+  type 'a t = 'a Conditional.t list
+
+  let empty = []
+  let singleton condition value = [ Conditional.make condition value ]
+  let singleton_all_platforms value = singleton Solver_env.empty value
+  let equal value_equal = List.equal (Conditional.equal value_equal)
+  let map ~f = List.map ~f:(Conditional.map ~f)
+  let to_dyn value_to_dyn = Dyn.list (Conditional.to_dyn value_to_dyn)
+
+  let find t query =
+    List.find_map t ~f:(fun conditional ->
+      if Conditional.matches conditional ~query
+      then Some (Conditional.get conditional)
+      else None)
+  ;;
+
+  let condition_exists t query =
+    List.exists t ~f:(fun conditional -> Conditional.matches conditional ~query)
+  ;;
+
+  let encode_field field_name value_encode t =
+    Encoder.field_l field_name (Conditional.encode value_encode) t
+  ;;
+
+  let merge a b =
+    let merged = a @ b in
+    let condition_set =
+      List.map merged ~f:Conditional.condition |> Solver_env.Set.of_list
+    in
+    if List.length merged != Solver_env.Set.cardinal condition_set
+    then Code_error.raise "todo" [];
+    merged
+  ;;
+
+  (* To support encoding in the non-portable format, this function extracts the
+     sole value from a conditional choice, raising a code error if there are
+     multiple choices. *)
+  let get_value_ensuring_at_most_one_choice t =
+    if List.length t > 1
+    then
+      Code_error.raise
+        "Expected at most one conditional choice"
+        [ "conditions", List.map t ~f:Conditional.condition |> Dyn.list Solver_env.to_dyn
+        ];
+    List.hd_opt t |> Option.map ~f:Conditional.get
+  ;;
+
+  let decode_backwards_compatible decode_value =
+    let open Decoder in
+    decode_value >>| singleton_all_platforms <|> repeat (Conditional.decode decode_value)
+  ;;
+end
+
 module Pkg_info = struct
   type t =
     { name : Package_name.t
@@ -76,9 +177,18 @@ module Build_command = struct
   module Fields = struct
     let dune = "dune"
     let action = "action"
+    let build = "build"
   end
 
-  let encode t =
+  let encode_non_portable t =
+    let open Encoder in
+    match t with
+    | None -> field_o Fields.build Encoder.unit None
+    | Some Dune -> field_b Fields.dune true
+    | Some (Action a) -> field Fields.build Action.encode a
+  ;;
+
+  let encode_portable t =
     let open Encoder in
     Dune_lang.List
       (record_fields
@@ -88,7 +198,7 @@ module Build_command = struct
          ])
   ;;
 
-  let decode =
+  let decode_portable =
     let open Decoder in
     enter
     @@ fields
@@ -100,6 +210,22 @@ module Build_command = struct
            , let+ () = return () in
              Dune )
          ]
+  ;;
+
+  let decode_fields_backwards_compatible =
+    let open Decoder in
+    let parse_action =
+      (let+ action = Action.decode_pkg in
+       Conditional_choice.singleton_all_platforms (Action action))
+      <|> repeat (Conditional.decode decode_portable)
+    in
+    fields_mutually_exclusive
+      ~default:Conditional_choice.empty
+      [ Fields.build, parse_action
+      ; ( Fields.dune
+        , let+ () = return () in
+          Conditional_choice.singleton_all_platforms Dune )
+      ]
   ;;
 end
 
@@ -138,98 +264,6 @@ module Depends = struct
   ;;
 
   let encode t = Dune_lang.List (List.map t ~f:Depend.encode)
-end
-
-module Conditional = struct
-  type 'a t =
-    { condition : Solver_env.t
-    ; value : 'a
-    }
-
-  let make condition value =
-    let condition = Solver_env.retain condition Package_variable_name.platform_specific in
-    { condition; value }
-  ;;
-
-  let equal value_equal { condition; value } t =
-    Solver_env.equal condition t.condition && value_equal value t.value
-  ;;
-
-  let to_dyn value_to_dyn { condition; value } =
-    Dyn.record [ "condition", Solver_env.to_dyn condition; "value", value_to_dyn value ]
-  ;;
-
-  let decode value_decode =
-    let open Decoder in
-    enter
-      (let+ condition = enter Solver_env.decode
-       and+ value = value_decode in
-       { condition; value })
-  ;;
-
-  let encode value_encode { condition; value } =
-    Dune_lang.List [ Solver_env.encode condition; value_encode value ]
-  ;;
-
-  let map t ~f = { t with value = f t.value }
-  let condition { condition; _ } = condition
-  let get { value; _ } = value
-
-  let matches t ~query =
-    Solver_env.fold t.condition ~init:true ~f:(fun variable stored_value acc ->
-      acc
-      &&
-      match Solver_env.get query variable with
-      | None ->
-        (* The stored env has a field missing from the query. Don't match in this case. *)
-        false
-      | Some query_value -> Variable_value.equal query_value stored_value)
-  ;;
-end
-
-module Conditional_choice = struct
-  type 'a t = 'a Conditional.t list
-
-  let empty = []
-  let singleton condition value = [ Conditional.make condition value ]
-
-  let of_list ls =
-    List.map ls ~f:(fun (condition, value) -> Conditional.make condition value)
-  ;;
-
-  let equal value_equal = List.equal (Conditional.equal value_equal)
-  let map ~f = List.map ~f:(Conditional.map ~f)
-  let to_dyn value_to_dyn = Dyn.list (Conditional.to_dyn value_to_dyn)
-
-  let find t query =
-    List.find_map t ~f:(fun conditional ->
-      if Conditional.matches conditional ~query
-      then Some (Conditional.get conditional)
-      else None)
-  ;;
-
-  let condition_exists t query =
-    List.exists t ~f:(fun conditional -> Conditional.matches conditional ~query)
-  ;;
-
-  let decode_field field_name value_decode =
-    let open Decoder in
-    field ~default:[] field_name (repeat (Conditional.decode value_decode))
-  ;;
-
-  let encode_field field_name value_encode t =
-    Encoder.field_l field_name (Conditional.encode value_encode) t
-  ;;
-
-  let merge a b =
-    let merged = a @ b in
-    let condition_set =
-      List.map merged ~f:Conditional.condition |> Solver_env.Set.of_list
-    in
-    if List.length merged != Solver_env.Set.cardinal condition_set
-    then Code_error.raise "todo" [];
-    merged
-  ;;
 end
 
 module Pkg = struct
@@ -304,14 +338,25 @@ module Pkg = struct
 
   let decode =
     let open Decoder in
+    let parse_install_command_backwards_compatible =
+      Conditional_choice.decode_backwards_compatible Action.decode_pkg
+    in
+    let parse_depends_backwards_compatible =
+      repeat Depend.decode
+      >>| Conditional_choice.singleton_all_platforms
+      <|> repeat (Conditional.decode Depends.decode)
+    in
     enter
     @@ fields
     @@ let+ version = field Fields.version Package_version.decode
        and+ install_command =
-         Conditional_choice.decode_field Fields.install Action.decode_pkg
-       and+ build_command =
-         Conditional_choice.decode_field Fields.build Build_command.decode
-       and+ depends = Conditional_choice.decode_field Fields.depends Depends.decode
+         field ~default:[] Fields.install parse_install_command_backwards_compatible
+       and+ build_command = Build_command.decode_fields_backwards_compatible
+       and+ depends =
+         field
+           ~default:(Conditional_choice.singleton_all_platforms [])
+           Fields.depends
+           parse_depends_backwards_compatible
        and+ depexts = field ~default:[] Fields.depexts (repeat string)
        and+ source = field_o Fields.source Source.decode
        and+ dev = field_b Fields.dev
@@ -348,6 +393,7 @@ module Pkg = struct
   ;;
 
   let encode
+        ~portable
         { build_command
         ; install_command
         ; depends
@@ -357,11 +403,34 @@ module Pkg = struct
         }
     =
     let open Encoder in
+    let install_command, build_command, depends =
+      if portable
+      then
+        ( Conditional_choice.encode_field Fields.install Action.encode install_command
+        , Conditional_choice.encode_field
+            Fields.build
+            Build_command.encode_portable
+            build_command
+        , Conditional_choice.encode_field Fields.depends Depends.encode depends )
+      else
+        ( field_o
+            Fields.install
+            Action.encode
+            (Conditional_choice.get_value_ensuring_at_most_one_choice install_command)
+        , Build_command.encode_non_portable
+            (Conditional_choice.get_value_ensuring_at_most_one_choice build_command)
+        , field_l
+            Fields.depends
+            Package_name.encode
+            (Conditional_choice.get_value_ensuring_at_most_one_choice depends
+             |> Option.value ~default:[]
+             |> List.map ~f:(fun { Depend.name; _ } -> name)) )
+    in
     record_fields
       [ field Fields.version Package_version.encode version
-      ; Conditional_choice.encode_field Fields.install Action.encode install_command
-      ; Conditional_choice.encode_field Fields.build Build_command.encode build_command
-      ; Conditional_choice.encode_field Fields.depends Depends.encode depends
+      ; install_command
+      ; build_command
+      ; depends
       ; field_l Fields.depexts string depexts
       ; field_o Fields.source Source.encode source
       ; field_b Fields.dev dev
@@ -650,11 +719,11 @@ module Package_filename = struct
   ;;
 end
 
-let file_contents_by_path t =
+let file_contents_by_path ~portable t =
   (metadata_filename, encode_metadata t)
   :: (Package_name.Map.to_list t.packages
       |> List.map ~f:(fun (name, pkg) ->
-        Package_filename.of_package_name name, Pkg.encode pkg))
+        Package_filename.of_package_name name, Pkg.encode ~portable pkg))
 ;;
 
 module Write_disk = struct
@@ -745,6 +814,7 @@ module Write_disk = struct
   type t = unit -> unit
 
   let prepare
+        ~portable
         ~lock_dir_path:lock_dir_path_src
         ~(files : File_entry.t Package_name.Map.Multi.t)
         lock_dir
@@ -764,7 +834,7 @@ module Write_disk = struct
     in
     let build lock_dir_path =
       let lock_dir_path = Result.ok_exn lock_dir_path in
-      file_contents_by_path lock_dir
+      file_contents_by_path ~portable lock_dir
       |> List.iter ~f:(fun (path_within_lock_dir, contents) ->
         let path = Path.relative lock_dir_path path_within_lock_dir in
         Option.iter (Path.parent path) ~f:Path.mkdir_p;
