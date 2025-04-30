@@ -1,6 +1,47 @@
 open Import
 open Dune_rpc
 
+module Promote = struct
+  include Dune_engine.Clflags.Promote
+
+  let sexp =
+    let open Conv in
+    let never = constr "Never" unit (fun () -> Never) in
+    let automatically = constr "Automatically" unit (fun () -> Automatically) in
+    let variants = [ econstr never; econstr automatically ] in
+    sum variants (function
+      | Never -> case () never
+      | Automatically -> case () automatically)
+  ;;
+end
+
+module Build_request = struct
+  type t =
+    { targets : string list
+    ; promote : Promote.t option
+    }
+
+  let create ~targets ~promote = { targets; promote }
+  let targets { targets; _ } = targets
+  let promote { promote; _ } = promote
+
+  let sexp_v1 =
+    let open Conv in
+    let from { targets; promote = _ } = targets in
+    let to_ targets = { targets; promote = None } in
+    iso (Conv.list Conv.string) to_ from
+  ;;
+
+  let sexp_v2 =
+    let open Conv in
+    let from { targets; promote } = targets, promote in
+    let to_ (targets, promote) = { targets; promote } in
+    let targets = field "targets" (required (Conv.list Conv.string)) in
+    let promote = field "promote" (optional Promote.sexp) in
+    iso (record (both targets promote)) to_ from
+  ;;
+end
+
 module Compound_user_error = struct
   include Dune_engine.Compound_user_error
 
@@ -77,14 +118,14 @@ end
 module Build = struct
   let v1 =
     Decl.Request.make_current_gen
-      ~req:(Conv.list Conv.string)
+      ~req:Build_request.sexp_v1
       ~resp:Build_outcome_with_diagnostics.sexp_v1
       ~version:1
   ;;
 
   let v2 =
     Decl.Request.make_current_gen
-      ~req:(Conv.list Conv.string)
+      ~req:Build_request.sexp_v2
       ~resp:Build_outcome_with_diagnostics.sexp_v2
       ~version:2
   ;;

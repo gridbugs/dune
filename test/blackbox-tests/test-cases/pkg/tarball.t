@@ -32,3 +32,5 @@ Demonstrate that we should support tarballs with and without a root directory
   $ runtest 2
   .
   ./foo
+
+  $ echo hi

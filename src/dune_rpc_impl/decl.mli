@@ -3,6 +3,14 @@ open Dune_rpc
 
 (** Internal RPC requests *)
 
+module Build_request : sig
+  type t
+
+  val create : targets:string list -> promote:Dune_engine.Clflags.Promote.t option -> t
+  val targets : t -> string list
+  val promote : t -> Dune_engine.Clflags.Promote.t option
+end
+
 module Build_outcome_with_diagnostics : sig
   type t =
     | Success
@@ -25,5 +33,5 @@ module Status : sig
   val sexp : (t, Conv.values) Conv.t
 end
 
-val build : (string list, Build_outcome_with_diagnostics.t) Decl.Request.t
+val build : (Build_request.t, Build_outcome_with_diagnostics.t) Decl.Request.t
 val status : (unit, Status.t) Decl.Request.t

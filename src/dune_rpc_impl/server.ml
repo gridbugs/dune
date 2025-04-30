@@ -24,6 +24,7 @@ include struct
   open Decl
   module Status = Status
   module Build_outcome_with_diagnostics = Build_outcome_with_diagnostics
+  module Build_request = Build_request
 end
 
 module Run = struct
@@ -108,8 +109,13 @@ module Run = struct
   ;;
 end
 
-type 'a pending_build_action =
-  | Build of 'a list * Dune_engine.Scheduler.Run.Build_outcome.t Fiber.Ivar.t
+type 'a build_action =
+  { targets : 'a list
+  ; outcome_ivar : Dune_engine.Scheduler.Run.Build_outcome.t Fiber.Ivar.t
+  ; promote : Dune_engine.Clflags.Promote.t option
+  }
+
+type 'a pending_build_action = Build of 'a build_action
 
 module Client = Stdune.Unit
 
@@ -192,7 +198,7 @@ end
 
 type 'a t =
   { config : Run.t
-  ; pending_build_jobs : ('a list * Build_outcome.t Fiber.Ivar.t) Job_queue.t
+  ; pending_build_jobs : 'a build_action Job_queue.t
   ; parse_build : string -> 'a
   ; mutable clients : Clients.t
   }
@@ -330,12 +336,17 @@ let handler (t : _ t Fdecl.t) handle : 'a Dune_rpc_server.Handler.t =
   in
   let () = Handler.implement_request rpc Procedures.Public.ping (fun _ -> Fiber.return) in
   let () =
-    let build _session targets =
+    let build _session build_request =
+      let targets = Build_request.targets build_request in
       let server = Fdecl.get t in
-      let ivar = Fiber.Ivar.create () in
+      let outcome_ivar = Fiber.Ivar.create () in
       let targets = List.map targets ~f:server.parse_build in
-      let* () = Job_queue.write server.pending_build_jobs (targets, ivar) in
-      let+ build_outcome = Fiber.Ivar.read ivar in
+      let* () =
+        Job_queue.write
+          server.pending_build_jobs
+          { targets; outcome_ivar; promote = Build_request.promote build_request }
+      in
+      let+ build_outcome = Fiber.Ivar.read outcome_ivar in
       match (build_outcome : Build_outcome.t) with
       | Success -> Build_outcome_with_diagnostics.Success
       | Failure -> Failure (get_current_diagnostic_errors ())
@@ -346,8 +357,8 @@ let handler (t : _ t Fdecl.t) handle : 'a Dune_rpc_server.Handler.t =
     let rec cancel_pending_jobs () =
       match Job_queue.pop_internal (Fdecl.get t).pending_build_jobs with
       | None -> Fiber.return ()
-      | Some (_, job) ->
-        let* () = Fiber.Ivar.fill job Build_outcome.Failure in
+      | Some { outcome_ivar; _ } ->
+        let* () = Fiber.Ivar.fill outcome_ivar Build_outcome.Failure in
         cancel_pending_jobs ()
     in
     let shutdown _ () =
@@ -455,6 +466,5 @@ let run t =
 ;;
 
 let pending_build_action t =
-  Job_queue.read t.pending_build_jobs
-  |> Fiber.map ~f:(fun (targets, ivar) -> Build (targets, ivar))
+  Job_queue.read t.pending_build_jobs |> Fiber.map ~f:(fun action -> Build action)
 ;;

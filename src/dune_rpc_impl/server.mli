@@ -10,8 +10,13 @@ val create
   -> parse_build:(string -> 'a)
   -> 'a t
 
-type 'a pending_build_action =
-  | Build of 'a list * Dune_engine.Scheduler.Run.Build_outcome.t Fiber.Ivar.t
+type 'a build_action =
+  { targets : 'a list
+  ; outcome_ivar : Dune_engine.Scheduler.Run.Build_outcome.t Fiber.Ivar.t
+  ; promote : Dune_engine.Clflags.Promote.t option
+  }
+
+type 'a pending_build_action = Build of 'a build_action
 
 val pending_build_action : 'a t -> 'a pending_build_action Fiber.t
 

@@ -42,43 +42,26 @@ let establish_client_session ~wait where =
   establish_connection_or_raise ~wait once
 ;;
 
-let build_sexp_string_targets ~wait ~targets where =
+let build_sexp_string_targets ~wait ~targets ~promote where =
   let open Fiber.O in
   let* connection = establish_client_session ~wait where in
   Dune_rpc_impl.Client.client
     connection
     (Dune_rpc.Initialize.Request.create ~id:(Dune_rpc.Id.make (Sexp.Atom "build")))
     ~f:(fun session ->
-      let open Fiber.O in
-      let+ response =
-        Rpc_common.request_exn
-          session
-          (Dune_rpc_private.Decl.Request.witness Dune_rpc_impl.Decl.build)
-          targets
-      in
-      match response with
-      | Error (error : Dune_rpc_private.Response.Error.t) ->
-        Printf.printf
-          "Error: %s\n%!"
-          (Dyn.to_string (Dune_rpc_private.Response.Error.to_dyn error))
-      | Ok Success -> print_endline "Success"
-      | Ok (Failure errors) ->
-        List.iter errors ~f:(fun { Dune_engine.Compound_user_error.main; _ } ->
-          Console.print_user_message main);
-        User_error.raise
-          [ (match List.length errors with
-             | 1 -> Pp.textf "Build failed with 1 error."
-             | n -> Pp.textf "Build failed with %d errors." n)
-          ])
+      Rpc_common.request_exn
+        session
+        (Dune_rpc_private.Decl.Request.witness Dune_rpc_impl.Decl.build)
+        (Dune_rpc_impl.Decl.Build_request.create ~targets ~promote))
 ;;
 
-let build ~wait where targets =
+let build ~wait ~promote where targets =
   let targets =
     List.map targets ~f:(fun target ->
       let sexp = Dune_lang.Dep_conf.encode target in
       Dune_lang.to_string sexp)
   in
-  build_sexp_string_targets ~wait ~targets where
+  build_sexp_string_targets ~wait ~targets ~promote where
 ;;
 
 let term =
@@ -93,7 +76,17 @@ let term =
     | Some where -> where
     | None -> User_error.raise [ Pp.text "No RPC server seems to be running." ]
   in
-  build_sexp_string_targets ~wait ~targets where
+  let open Fiber.O in
+  let+ response =
+    build_sexp_string_targets ~wait ~targets ~promote:!Dune_engine.Clflags.promote where
+  in
+  match response with
+  | Error (error : Dune_rpc_private.Response.Error.t) ->
+    Printf.printf
+      "Error: %s\n%!"
+      (Dyn.to_string (Dune_rpc_private.Response.Error.to_dyn error))
+  | Ok Success -> print_endline "Success"
+  | Ok (Failure _) -> print_endline "Failure"
 ;;
 
 let info =

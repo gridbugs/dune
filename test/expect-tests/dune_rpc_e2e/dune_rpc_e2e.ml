@@ -133,8 +133,14 @@ let run_server ?(watch_mode_args = [ "--passive-watch-mode" ]) ?env ~root_dir ()
 
 let dune_build client what =
   printfn "Building %s" what;
+  let build_request =
+    Dune_rpc_impl.Decl.Build_request.create ~targets:[ what ] ~promote:None
+  in
   let+ res =
-    request_exn client (Dune_rpc.Decl.Request.witness Dune_rpc_impl.Decl.build) [ what ]
+    request_exn
+      client
+      (Dune_rpc.Decl.Request.witness Dune_rpc_impl.Decl.build)
+      build_request
   in
   match res with
   | Error e ->

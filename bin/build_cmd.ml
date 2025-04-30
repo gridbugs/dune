@@ -92,11 +92,22 @@ let poll_handling_rpc_build_requests ~(common : Common.t) ~config =
   in
   Scheduler.Run.poll_passive
     ~get_build_request:
-      (let+ (Build (targets, ivar)) = Dune_rpc_impl.Server.pending_build_action rpc in
+      (let+ (Build { targets; outcome_ivar; promote }) =
+         Dune_rpc_impl.Server.pending_build_action rpc
+       in
+       let original_promote = !Dune_engine.Clflags.promote in
+       Dune_engine.Clflags.promote := promote;
+       print_endline
+         (sprintf
+            "ccccccccccccccccccc %s"
+            (Dyn.option Dune_engine.Clflags.Promote.to_dyn promote |> Dyn.to_string));
        let request setup =
          Target.interpret_targets (Common.root common) config setup targets
        in
-       run_build_system ~common ~request, ivar)
+       ( (let+ result = run_build_system ~common ~request in
+          Dune_engine.Clflags.promote := original_promote;
+          result)
+       , outcome_ivar ))
 ;;
 
 let run_build_command_poll_eager ~(common : Common.t) ~config ~request : unit =
@@ -138,7 +149,26 @@ let run_build_command ~(common : Common.t) ~config ~request =
     ~request
 ;;
 
-let build_rpc where targets = Rpc.Build.build ~wait:false where targets
+let build_rpc where targets =
+  let open Fiber.O in
+  let promote = !Dune_engine.Clflags.promote in
+  let+ response = Rpc.Build.build ~wait:false ~promote where targets in
+  match response with
+  | Error (error : Dune_rpc_private.Response.Error.t) ->
+    Printf.printf
+      "Error: %s\n%!"
+      (Dyn.to_string (Dune_rpc_private.Response.Error.to_dyn error))
+  | Ok Success -> print_endline "Success"
+  | Ok (Failure errors) ->
+    List.iter errors ~f:(fun { Dune_engine.Compound_user_error.main; _ } ->
+      Console.print_user_message main);
+    User_error.raise
+      [ (match List.length errors with
+         | 0 -> Pp.textf "Build failed."
+         | 1 -> Pp.textf "Build failed with 1 error."
+         | n -> Pp.textf "Build failed with %d errors." n)
+      ]
+;;
 
 let build =
   let doc = "Build the given targets, or the default ones if none are given." in
