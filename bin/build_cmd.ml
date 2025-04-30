@@ -138,6 +138,8 @@ let run_build_command ~(common : Common.t) ~config ~request =
     ~request
 ;;
 
+let build_rpc where targets = Rpc.Build.build ~wait:false where targets
+
 let build =
   let doc = "Build the given targets, or the default ones if none are given." in
   let man =
@@ -164,10 +166,14 @@ let build =
       | _ :: _ -> targets
     in
     let common, config = Common.init builder in
-    let request setup =
-      Target.interpret_targets (Common.root common) config setup targets
-    in
-    run_build_command ~common ~config ~request
+    match Dune_rpc_client.Where.get () with
+    | Some where ->
+      Scheduler.go_without_rpc_server ~common ~config (fun () -> build_rpc where targets)
+    | None ->
+      let request setup =
+        Target.interpret_targets (Common.root common) config setup targets
+      in
+      run_build_command ~common ~config ~request
   in
   Cmd.v (Cmd.info "build" ~doc ~man ~envs:Common.envs) term
 ;;

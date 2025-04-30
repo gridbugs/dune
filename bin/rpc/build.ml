@@ -29,34 +29,24 @@ let establish_connection_or_raise ~wait once =
         ]
 ;;
 
-let establish_client_session ~wait =
+let establish_client_session ~wait where =
   let open Fiber.O in
   let once () =
-    let where = Dune_rpc_impl.Where.get () in
-    match where with
-    | None -> Fiber.return None
-    | Some where ->
-      let+ connection = Client.Connection.connect where in
-      (match connection with
-       | Ok conn -> Some conn
-       | Error message ->
-         if not wait then Console.print_user_message message;
-         None)
+    let+ connection = Client.Connection.connect where in
+    match connection with
+    | Ok conn -> Some conn
+    | Error message ->
+      if not wait then Console.print_user_message message;
+      None
   in
   establish_connection_or_raise ~wait once
 ;;
 
-let term =
-  let name_ = Arg.info [] ~docv:"TARGET" in
-  let+ (builder : Common.Builder.t) = Common.Builder.term
-  and+ wait = Rpc_common.wait_term
-  and+ targets = Arg.(value & pos_all string [] name_) in
-  Rpc_common.client_term builder
-  @@ fun _common ->
+let build_sexp_string_targets ~wait ~targets where =
   let open Fiber.O in
-  let* conn = establish_client_session ~wait in
+  let* connection = establish_client_session ~wait where in
   Dune_rpc_impl.Client.client
-    conn
+    connection
     (Dune_rpc.Initialize.Request.create ~id:(Dune_rpc.Id.make (Sexp.Atom "build")))
     ~f:(fun session ->
       let open Fiber.O in
@@ -72,7 +62,38 @@ let term =
           "Error: %s\n%!"
           (Dyn.to_string (Dune_rpc_private.Response.Error.to_dyn error))
       | Ok Success -> print_endline "Success"
-      | Ok Failure -> print_endline "Failure")
+      | Ok (Failure errors) ->
+        List.iter errors ~f:(fun { Dune_engine.Compound_user_error.main; _ } ->
+          Console.print_user_message main);
+        User_error.raise
+          [ (match List.length errors with
+             | 1 -> Pp.textf "Build failed with 1 error."
+             | n -> Pp.textf "Build failed with %d errors." n)
+          ])
+;;
+
+let build ~wait where targets =
+  let targets =
+    List.map targets ~f:(fun target ->
+      let sexp = Dune_lang.Dep_conf.encode target in
+      Dune_lang.to_string sexp)
+  in
+  build_sexp_string_targets ~wait ~targets where
+;;
+
+let term =
+  let name_ = Arg.info [] ~docv:"TARGET" in
+  let+ (builder : Common.Builder.t) = Common.Builder.term
+  and+ wait = Rpc_common.wait_term
+  and+ targets = Arg.(value & pos_all string [] name_) in
+  Rpc_common.client_term builder
+  @@ fun _common ->
+  let where =
+    match Dune_rpc_impl.Where.get () with
+    | Some where -> where
+    | None -> User_error.raise [ Pp.text "No RPC server seems to be running." ]
+  in
+  build_sexp_string_targets ~wait ~targets where
 ;;
 
 let info =

@@ -81,6 +81,10 @@ module User_message : sig
       | Success
       | Ansi_styles of Ansi_color.Style.t list
   end
+
+  type t = Stdune.User_message.t
+
+  val sexp_without_annots : t Conv.value
 end
 
 module Diagnostic : sig

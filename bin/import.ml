@@ -186,7 +186,7 @@ module Scheduler = struct
     }
   ;;
 
-  let go ~(common : Common.t) ~config:dune_config f =
+  let go_without_rpc_server ~(common : Common.t) ~config:dune_config f =
     let stats = Common.stats common in
     let config =
       let watch_exclusions = Common.watch_exclusions common in
@@ -197,12 +197,16 @@ module Scheduler = struct
         ~watch_exclusions
     in
     Dune_rules.Clflags.concurrency := config.concurrency;
+    Run.go config ~on_event:(on_event dune_config) f
+  ;;
+
+  let go ~common ~config f =
     let f =
       match Common.rpc common with
       | `Allow server -> fun () -> Dune_engine.Rpc.with_background_rpc (rpc server) f
       | `Forbid_builds -> f
     in
-    Run.go config ~on_event:(on_event dune_config) f
+    go_without_rpc_server ~common ~config f
   ;;
 
   let go_with_rpc_server_and_console_status_reporting

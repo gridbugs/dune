@@ -44,12 +44,26 @@ Basic tests for the file-watching mode.
 
   $ mv x z
   $ build y
-  Failure
+  File "dune", lines 1-4, characters 0-59:
+  1 | (rule
+  2 |  (target y)
+  3 |  (deps x)
+  4 |  (action (system "cat x > y")))
+  Error: No rule found for x
+  Error: Build failed with 1 error.
+  [1]
 
   $ echo new-contents3 > z
 
   $ build y
-  Failure
+  File "dune", lines 1-4, characters 0-59:
+  1 | (rule
+  2 |  (target y)
+  3 |  (deps x)
+  4 |  (action (system "cat x > y")))
+  Error: No rule found for x
+  Error: Build failed with 1 error.
+  [1]
 
   $ mv z x
   $ build y
