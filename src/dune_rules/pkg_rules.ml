@@ -1930,6 +1930,17 @@ let setup_package_rules ~package_universe ~dir ~pkg_name : Gen_rules.result Memo
   Gen_rules.make ~directory_targets ~build_dir_only_sub_dirs rules
 ;;
 
+let dummy () =
+  let action =
+    Action_builder.write_file
+      (Path.Build.of_string "_private/default/.lock/dune.lock/dummy")
+      "hello"
+  in
+  let rule = rule ~loc:Loc.none action in
+  let rules = Rules.collect_unit (fun () -> rule) in
+  Gen_rules.make rules
+;;
+
 let setup_rules ~components ~dir ctx =
   (* Note that the path components in the following patterns must
      correspond to the paths returned by [Paths.make]. The string
@@ -1937,6 +1948,12 @@ let setup_rules ~components ~dir ctx =
      the value of [Pkg_dev_tool.install_path_base_dir_name]. *)
   assert (String.equal Pkg_dev_tool.install_path_base_dir_name ".dev-tool");
   match Context_name.is_default ctx, components with
+  | true, [ ".lock"; "dune.lock" ] -> Memo.return @@ dummy ()
+  | true, [ ".lock" ] ->
+    let build_dir_only_sub_dirs =
+      Gen_rules.Build_only_sub_dirs.singleton ~dir @@ Subdir_set.of_list [ "dune.lock" ]
+    in
+    Memo.return @@ Gen_rules.make ~build_dir_only_sub_dirs (Memo.return Rules.empty)
   | true, [ ".dev-tool"; pkg_name; pkg_dep_name ] ->
     setup_package_rules
       ~package_universe:
@@ -1962,7 +1979,7 @@ let setup_rules ~components ~dir ctx =
   | true, ".dev-tool" :: _ :: _ :: _ ->
     Memo.return @@ Gen_rules.redirect_to_parent Gen_rules.Rules.empty
   | is_default, [] ->
-    let sub_dirs = ".pkg" :: (if is_default then [ ".dev-tool" ] else []) in
+    let sub_dirs = ".pkg" :: ".lock" :: (if is_default then [ ".dev-tool" ] else []) in
     let build_dir_only_sub_dirs =
       Gen_rules.Build_only_sub_dirs.singleton ~dir @@ Subdir_set.of_list sub_dirs
     in
