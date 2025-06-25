@@ -89,7 +89,8 @@ module Cmd : sig
   val v : info -> 'a Term.t -> 'a t
   val group : ?default:'a Term.t -> info -> 'a t list -> 'a t
   val print_completion_script_bash : string -> _ t
-  val eval_value : ?catch:_ -> 'a t -> ('a, _) result
+  val eval_value : ?catch:_ -> args:string list -> 'a t -> ('a, _) result
+  val run : ?catch:_ -> 'a t -> ('a, _) result
 end
 
 module Arg : sig

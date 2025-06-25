@@ -1,3 +1,68 @@
+module Help_style : sig
+  type color =
+    [ `Black
+    | `Red
+    | `Green
+    | `Yellow
+    | `Blue
+    | `Magenta
+    | `Cyan
+    | `White
+    | `Bright_black
+    | `Bright_red
+    | `Bright_green
+    | `Bright_yellow
+    | `Bright_blue
+    | `Bright_magenta
+    | `Bright_cyan
+    | `Bright_white
+    ]
+
+  type ansi_style =
+    { bold : bool
+    ; dim : bool
+    ; underline : bool
+    ; color : color option
+    }
+
+  val ansi_style_plain : ansi_style
+
+  type t =
+    { program_doc : ansi_style
+    ; usage : ansi_style
+    ; arg_name : ansi_style
+    ; arg_doc : ansi_style
+    ; section_heading : ansi_style
+    }
+
+  (** An opinionated default value with some colours and formatting *)
+  val default : t
+
+  (** Plain formatting for each part of help messages *)
+  val plain : t
+end
+
+module Manpage : sig
+  type markup =
+    [ `P of string
+    | `Pre of string
+    ]
+
+  (** The parts of a manpage that are hand-written and not generated from the
+      command line spec *)
+  type prose = Manpage.Prose.t
+
+  val prose
+    :  ?description:markup list
+    -> ?environment:markup list
+    -> ?files:markup list
+    -> ?examples:markup list
+    -> ?authors:markup list
+    -> ?extra:(string * markup list) list
+    -> unit
+    -> prose
+end
+
 (** A DSL for declaratively describing a program's command-line arguments *)
 module Arg_parser : sig
   (** A parser of values of type ['a] *)
@@ -96,6 +161,7 @@ module Arg_parser : sig
   val list : ?sep:char -> 'a conv -> 'a list conv
 
   val map : 'a t -> f:('a -> 'b) -> 'b t
+  val map' : 'a t -> f:('a -> ('b, Non_ret.t) result) -> 'b t
   val both : 'a t -> 'b t -> ('a * 'b) t
   val ( >>| ) : 'a t -> ('a -> 'b) -> 'b t
   val ( let+ ) : 'a t -> ('a -> 'b) -> 'b t
@@ -124,7 +190,7 @@ module Arg_parser : sig
 
   (** A named argument that may appear multiple times on the command line. *)
   val named_multi
-    :  ?desc:string
+    :  ?doc:string
     -> ?value_name:string
     -> ?hidden:bool
     -> ?completion:'a Completion.t
@@ -134,7 +200,7 @@ module Arg_parser : sig
 
   (** A named argument that may appear at most once on the command line. *)
   val named_opt
-    :  ?desc:string
+    :  ?doc:string
     -> ?value_name:string
     -> ?hidden:bool
     -> ?completion:'a Completion.t
@@ -145,7 +211,7 @@ module Arg_parser : sig
   (** A named argument that may appear at most once on the command line. If the
       argument is not passed then a given default value will be used instead. *)
   val named_with_default
-    :  ?desc:string
+    :  ?doc:string
     -> ?value_name:string
     -> ?hidden:bool
     -> ?completion:'a Completion.t
@@ -156,7 +222,7 @@ module Arg_parser : sig
 
   (** A named argument that must appear exactly once on the command line. *)
   val named_req
-    :  ?desc:string
+    :  ?doc:string
     -> ?value_name:string
     -> ?hidden:bool
     -> ?completion:'a Completion.t
@@ -166,15 +232,15 @@ module Arg_parser : sig
 
   (** A flag that may appear multiple times on the command line.
       Evaluates to the number of times the flag appeared. *)
-  val flag_count : ?desc:string -> ?hidden:bool -> string list -> int t
+  val flag_count : ?doc:string -> ?hidden:bool -> string list -> int t
 
   (** A flag that may appear at most once on the command line. *)
-  val flag : ?desc:string -> string list -> bool t
+  val flag : ?doc:string -> string list -> bool t
 
   (** [pos_opt i conv] declares an optional anonymous positional
       argument at position [i] (starting at 0). *)
   val pos_opt
-    :  ?desc:string
+    :  ?doc:string
     -> ?value_name:string
     -> ?completion:'a Completion.t
     -> int
@@ -184,7 +250,7 @@ module Arg_parser : sig
   (** [pos_with_default i conv] declares an optional anonymous positional
       argument with a default value at position [i] (starting at 0). *)
   val pos_with_default
-    :  ?desc:string
+    :  ?doc:string
     -> ?value_name:string
     -> ?completion:'a Completion.t
     -> int
@@ -195,7 +261,7 @@ module Arg_parser : sig
   (** [pos_req i conv] declares a required anonymous positional
       argument at position [i] (starting at 0). *)
   val pos_req
-    :  ?desc:string
+    :  ?doc:string
     -> ?value_name:string
     -> ?completion:'a Completion.t
     -> int
@@ -204,7 +270,7 @@ module Arg_parser : sig
 
   (** Parses all positional arguments. *)
   val pos_all
-    :  ?desc:string
+    :  ?doc:string
     -> ?value_name:string
     -> ?completion:'a Completion.t
     -> 'a conv
@@ -213,7 +279,7 @@ module Arg_parser : sig
   (** [pos_left i conv] parses all positional arguments at positions less than
       i. *)
   val pos_left
-    :  ?desc:string
+    :  ?doc:string
     -> ?value_name:string
     -> ?completion:'a Completion.t
     -> int
@@ -223,7 +289,7 @@ module Arg_parser : sig
   (** [pos_right i conv] parses all positional arguments at positions greater
       than i. *)
   val pos_right
-    :  ?desc:string
+    :  ?doc:string
     -> ?value_name:string
     -> ?completion:'a Completion.t
     -> int
@@ -269,9 +335,6 @@ module Eval_config : sig
   val default : t
 end
 
-(** Raised if the command being evaluated printed a usage message *)
-exception Usage
-
 module Program_name : sig
   type t =
     | Argv0
@@ -281,23 +344,22 @@ end
 module Command : sig
   type 'a t
 
-  (** Declare a single command. Performs some checks that the parser is
-      well-formed and raises a [Spec_error.E] if iat's invalid. *)
-  val singleton : ?desc:string -> 'a Arg_parser.t -> 'a t
+  (** Declare a single command. *)
+  val singleton : ?doc:string -> ?prose:Manpage.prose -> 'a Arg_parser.t -> 'a t
 
   type 'a subcommand
 
-  val subcommand : ?hidden:bool -> string -> 'a t -> 'a subcommand
+  val subcommand : ?hidden:bool -> ?aliases:string list -> string -> 'a t -> 'a subcommand
 
   (** [group children] returns a command with a hierarchy of subcommands, the
       leaves of which will be either singletons or empty groups (groups with an
       empty list of children). If the [default_arg_parser] argument is passed then
       sequences of subcommands may terminating with this command and will be
-      passed with that argument. Performs some checks that each parser is
-      well-formed and raises a [Spec_error.E] if an invalid parser is found.*)
+      passed with that argument. *)
   val group
     :  ?default_arg_parser:'a Arg_parser.t
-    -> ?desc:string
+    -> ?doc:string
+    -> ?prose:Manpage.prose
     -> 'a subcommand list
     -> 'a t
 
@@ -354,40 +416,44 @@ module Command : sig
   val eval
     :  ?eval_config:Eval_config.t
     -> ?program_name:Program_name.t
+    -> ?help_style:Help_style.t
+    -> ?version:string
     -> 'a t
     -> string list
     -> 'a
 
   (** Run the command line parser returning its result. Parse errors are
       handled by printing an error message to stderr and exiting. *)
-  val run : ?eval_config:Eval_config.t -> 'a t -> 'a
+  val run
+    :  ?eval_config:Eval_config.t
+    -> ?program_name:Program_name.t
+    -> ?help_style:Help_style.t
+    -> ?version:string
+    -> 'a t
+    -> 'a
 
   (** [run_singleton arg_parser] is a shorthand for [run (singleton arg_parser)] *)
-  val run_singleton : ?eval_config:Eval_config.t -> ?desc:string -> 'a Arg_parser.t -> 'a
+  val run_singleton
+    :  ?eval_config:Eval_config.t
+    -> ?program_name:Program_name.t
+    -> ?help_style:Help_style.t
+    -> ?version:string
+    -> ?doc:string
+    -> 'a Arg_parser.t
+    -> 'a
 end
 
-module Parse_error : sig
-  (** Errors encountered while interpreting command-line arguments. This
-      indicates that the user of a CLI program made with this library has
-      passed invalid command-line arguments to the program. *)
-  type t
+module For_test : sig
+  module Climate_stdlib : module type of Climate_stdlib
+  module Non_ret : module type of Non_ret
+  module Parse_error : module type of Error.Parse_error
 
-  exception E of t
+  val eval_result
+    :  program_name:string
+    -> 'a Command.t
+    -> string list
+    -> ('a, Non_ret.t) result
 
-  val to_string : t -> string
+  val print_help_spec : Command_doc_spec.t -> unit
+  val print_manpage : Command_doc_spec.t -> Manpage.prose -> unit
 end
-
-module Spec_error : sig
-  (** Errors that indicate that a client of this library has attempted
-      to create an invalid argument spec. These are included to aid
-      debugging when writing a CLI program with this library, though a
-      user of a CLI tool should never encounter one of these, no
-      matter which arguments they pass. *)
-  type t
-
-  exception E of t
-
-  val to_string : t -> string
-end
-
-module For_test : module type of For_test

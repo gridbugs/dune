@@ -37,12 +37,8 @@ open struct
         Code_error.raise "Unexpected result evaluating term with no args" data
       in
       (* Cmdliner doesn't allow argv to be empty. *)
-      let argv = [| "dune" |] in
-      let env _ = None in
-      match Cmd.eval_value ~argv ~env (Cmd.v (Cmd.info "dune") t) with
-      | Ok (`Ok x) -> x
-      | Ok `Help -> raise_code_error [ "ok", Dyn.string "help" ]
-      | Ok `Version -> raise_code_error [ "ok", Dyn.string "version" ]
+      match Cmd.eval_value ~args:[] (Cmd.v (Cmd.info "dune") t) with
+      | Ok x -> x
       | Error e ->
         let error_string =
           match e with

@@ -32,8 +32,6 @@ module Parse_error = struct
         ; invalid_char : char
         }
 
-  exception E of t
-
   let to_string = function
     | Arg_lacks_param name ->
       sprintf "Named argument %S lacks parameter." (Name.to_string_with_dashes name)
@@ -119,8 +117,7 @@ module Spec_error = struct
         ; value_name2 : string
         }
     | Conflicting_requiredness_for_positional_argument of int
-
-  exception E of t
+    | Duplicate_command_names of string list
 
   let to_string = function
     | Empty_name_list -> "Name list is empty"
@@ -176,7 +173,12 @@ module Spec_error = struct
         "Multiple positional arguments registered at the same index (%d) with different \
          requiredness"
         index
+    | Duplicate_command_names names ->
+      sprintf "Duplicate command names: %s" (String.concat ~sep:", " names)
   ;;
 end
 
-let spec_error error = raise (Spec_error.E error)
+let spec_error error =
+  raise
+    (Failure (Printf.sprintf "Error in argument spec: %s" (Spec_error.to_string error)))
+;;

@@ -26,8 +26,6 @@ module Parse_error : sig
         ; invalid_char : char
         }
 
-  exception E of t
-
   val to_string : t -> string
   val exit_code : int
 end
@@ -48,8 +46,7 @@ module Spec_error : sig
         ; value_name2 : string
         }
     | Conflicting_requiredness_for_positional_argument of int
-
-  exception E of t
+    | Duplicate_command_names of string list
 
   val to_string : t -> string
 end
