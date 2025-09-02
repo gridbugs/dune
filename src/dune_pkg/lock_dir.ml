@@ -1319,7 +1319,10 @@ module Write_disk = struct
      error if the lock dir already exists. [dst] is the new file name *)
   let safely_rename_lock_dir_thunk ~dst src =
     match check_existing_lock_dir src, check_existing_lock_dir dst with
-    | Ok `Is_existing_lock_dir, Ok `Non_existant -> fun () -> Path.rename src dst
+    | Ok `Is_existing_lock_dir, Ok `Non_existant ->
+      fun () ->
+        Io.copy_file ~src ~dst ();
+        Path.rm_rf src
     | Ok `Non_existant, Ok `Non_existant -> Fun.const ()
     | _, Ok `Is_existing_lock_dir ->
       let error_reason_pp =
@@ -1347,8 +1350,8 @@ module Write_disk = struct
     =
     let lock_dir_hidden =
       (* The original lockdir path with the lockdir renamed to begin with a ".". *)
-      let _hidden_basename = sprintf ".%s" (Path.basename lock_dir_path_external) in
-      Path.external_ (Path.External.of_string "/tmp/foo")
+      let hidden_basename = sprintf ".%s" (Path.basename lock_dir_path_external) in
+      Path.relative (Path.parent_exn lock_dir_path_external) hidden_basename
     in
     let remove_hidden_dir_if_exists () =
       safely_remove_lock_dir_if_exists_thunk lock_dir_hidden ()
