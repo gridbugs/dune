@@ -1347,8 +1347,8 @@ module Write_disk = struct
     =
     let lock_dir_hidden =
       (* The original lockdir path with the lockdir renamed to begin with a ".". *)
-      let hidden_basename = sprintf ".%s" (Path.basename lock_dir_path_external) in
-      Path.relative (Path.parent_exn lock_dir_path_external) hidden_basename
+      let _hidden_basename = sprintf ".%s" (Path.basename lock_dir_path_external) in
+      Path.external_ (Path.External.of_string "/tmp/foo")
     in
     let remove_hidden_dir_if_exists () =
       safely_remove_lock_dir_if_exists_thunk lock_dir_hidden ()
