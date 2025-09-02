@@ -1253,93 +1253,6 @@ let file_contents_by_path ~portable_lock_dir t =
 ;;
 
 module Write_disk = struct
-  (* Checks whether path refers to a valid lock directory and returns a value
-     indicating the status of the lock directory. [Ok _] values indicate that
-     it's safe to proceed with regenerating the lock directory. [Error _]
-     values indicate that it's unsafe to remove the existing directory and lock
-     directory regeneration should not proceed. *)
-  let check_existing_lock_dir path =
-    match Path.stat path with
-    | Ok { st_kind = S_DIR; _ } ->
-      let metadata_path = Path.relative path metadata_filename in
-      (match Path.stat metadata_path with
-       | Ok { st_kind = S_REG; _ } ->
-         (match Metadata.load metadata_path ~f:(Fun.const decode_metadata) with
-          | Ok _unused -> Ok `Is_existing_lock_dir
-          | Error exn -> Error (`Failed_to_parse_metadata (metadata_path, exn)))
-       | _ -> Error `No_metadata_file)
-    | Error (Unix.ENOENT, _, _) -> Ok `Non_existant
-    | Error _ -> Error `Unreadable
-    | Ok _ -> Error `Not_directory
-  ;;
-
-  let raise_user_error_on_check_existance path e =
-    let error_reason =
-      match e with
-      | `Unreadable ->
-        Pp.textf "Unable to read lock directory (%s)" (Path.to_string_maybe_quoted path)
-      | `Not_directory ->
-        Pp.textf
-          "Specified lock dir path (%s) is not a directory"
-          (Path.to_string_maybe_quoted path)
-      | `No_metadata_file ->
-        Pp.textf "Specified lock dir lacks metadata file (%s)" metadata_filename
-      | `Failed_to_parse_metadata (path, exn) ->
-        Pp.concat
-          ~sep:Pp.cut
-          [ Pp.textf
-              "Unable to parse lock directory metadata file (%s):"
-              (Path.to_string_maybe_quoted path)
-            |> Pp.hovbox
-          ; Exn.pp exn |> Pp.hovbox
-          ]
-        |> Pp.vbox
-    in
-    User_error.raise
-      [ Pp.textf
-          "Refusing to regenerate lock directory %s"
-          (Path.to_string_maybe_quoted path)
-      ; error_reason
-      ]
-  ;;
-
-  (* Removes the existing lock directory at the specified path if it exists and
-     is a valid lock directory. Checks the validity of the existing lockdir (if
-     any) and raises if it's invalid before constructing the returned thunk, so
-     validation can happen separately from executing the side effect that removes
-     the directory. *)
-  let safely_remove_lock_dir_if_exists_thunk path =
-    match check_existing_lock_dir path with
-    | Ok `Non_existant -> Fun.const ()
-    | Ok `Is_existing_lock_dir -> fun () -> Path.rm_rf path
-    | Error e -> raise_user_error_on_check_existance path e
-  ;;
-
-  (* Does the same checks as [safely_remove_lock_dir_if_exists_thunk] but it raises an
-     error if the lock dir already exists. [dst] is the new file name *)
-  let safely_rename_lock_dir_thunk ~dst src =
-    match check_existing_lock_dir src, check_existing_lock_dir dst with
-    | Ok `Is_existing_lock_dir, Ok `Non_existant ->
-      fun () ->
-        Io.copy_file ~src ~dst ();
-        Path.rm_rf src
-    | Ok `Non_existant, Ok `Non_existant -> Fun.const ()
-    | _, Ok `Is_existing_lock_dir ->
-      let error_reason_pp =
-        Pp.textf
-          "Directory %s already exists: can't rename safely"
-          (Path.to_string_maybe_quoted src)
-      in
-      User_error.raise
-        [ Pp.textf
-            "Refusing to regenerate lock directory %s"
-            (Path.to_string_maybe_quoted src)
-        ; error_reason_pp
-        ]
-    | Error e, _ -> raise_user_error_on_check_existance src e
-    | _, Error e -> raise_user_error_on_check_existance dst e
-  ;;
-
   type t = unit -> unit
 
   let prepare
@@ -1348,19 +1261,7 @@ module Write_disk = struct
         ~(files : File_entry.t Package_version.Map.Multi.t Package_name.Map.t)
         lock_dir
     =
-    let lock_dir_hidden =
-      (* The original lockdir path with the lockdir renamed to begin with a ".". *)
-      let hidden_basename = sprintf ".%s" (Path.basename lock_dir_path_external) in
-      Path.relative (Path.parent_exn lock_dir_path_external) hidden_basename
-    in
-    let remove_hidden_dir_if_exists () =
-      safely_remove_lock_dir_if_exists_thunk lock_dir_hidden ()
-    in
-    let rename_old_lock_dir_to_hidden =
-      safely_rename_lock_dir_thunk ~dst:lock_dir_hidden lock_dir_path_external
-    in
     let build lock_dir_path =
-      let lock_dir_path = Result.ok_exn lock_dir_path in
       file_contents_by_path ~portable_lock_dir lock_dir
       |> List.iter ~f:(fun (path_within_lock_dir, contents) ->
         let path = Path.relative lock_dir_path path_within_lock_dir in
@@ -1390,19 +1291,11 @@ module Write_disk = struct
               Path.mkdir_p (Path.parent_exn dst);
               match original with
               | Path src -> Io.copy_file ~src ~dst ()
-              | Content content -> Io.write_file dst content))));
-      rename_old_lock_dir_to_hidden ();
-      safely_rename_lock_dir_thunk ~dst:lock_dir_path_external lock_dir_path ();
-      remove_hidden_dir_if_exists ()
+              | Content content -> Io.write_file dst content))))
     in
-    match Path.parent lock_dir_path_external with
-    | Some parent_dir ->
-      fun () ->
-        Path.mkdir_p parent_dir;
-        Temp.with_temp_dir ~parent_dir ~prefix:"dune" ~suffix:"lock" ~f:build
-    | None ->
-      User_error.raise
-        [ Pp.textf "Temporary directory can't be created by deriving the lock dir path" ]
+    fun () ->
+      Path.rm_rf lock_dir_path_external;
+      build lock_dir_path_external
   ;;
 
   let commit t = t ()
