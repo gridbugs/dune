@@ -1,5 +1,6 @@
 open! Import
 module Pkg_dev_tool = Dune_rules.Pkg_dev_tool
+module Lock_dir = Dune_pkg.Lock_dir
 
 let add_dev_tools_to_path env =
   List.fold_left Pkg_dev_tool.all ~init:env ~f:(fun acc tool ->
@@ -7,9 +8,21 @@ let add_dev_tools_to_path env =
     Env_path.cons acc ~dir)
 ;;
 
+let dev_tool_slug dev_tool =
+  let open Fiber.O in
+  let+ platform = Pkg.Pkg_common.poll_solver_env_from_current_system () in
+  let pkgs =
+    Lock_dir.read_disk_exn (Lock_dir.dev_tool_lock_dir_path dev_tool)
+    |> Lock_dir.packages_on_platform ~platform
+  in
+  let pkg = Package_name.Map.find_exn pkgs (Pkg_dev_tool.package_name dev_tool) in
+  Lazy.force (Option.value_exn pkg.slug)
+;;
+
 let dev_tool_exe_path dev_tool = Path.build @@ Pkg_dev_tool.exe_path dev_tool
 
 let dev_tool_build_target dev_tool =
+  let open Fiber.O in
   Dune_lang.Dep_conf.File
     (Dune_lang.String_with_vars.make_text
        Loc.none
@@ -18,9 +31,12 @@ let dev_tool_build_target dev_tool =
 
 let build_dev_tool_directly common dev_tool =
   let open Fiber.O in
+  let* slug = dev_tool_slug dev_tool in
+  let exe_path = Pkg_dev_tool.exe_path dev_tool in
+  print_endline (sprintf "ccc %s" (Path.Build.to_string exe_path));
   let+ result =
     Build.run_build_system ~common ~request:(fun _build_system ->
-      Action_builder.path (dev_tool_exe_path dev_tool))
+      Action_builder.path (Path.build exe_path))
   in
   match result with
   | Error `Already_reported -> raise Dune_util.Report_error.Already_reported
@@ -28,6 +44,7 @@ let build_dev_tool_directly common dev_tool =
 ;;
 
 let build_dev_tool_via_rpc dev_tool =
+  let open Fiber.O in
   let target = dev_tool_build_target dev_tool in
   Build.build_via_rpc_server ~print_on_success:false ~targets:[ target ]
 ;;

@@ -10,6 +10,7 @@ include struct
   module Build_command = Lock_dir.Build_command
   module Display = Dune_engine.Display
   module Pkg_info = Lock_dir.Pkg_info
+  module Pkg_slug = Lock_dir.Pkg_slug
   module Depexts = Lock_dir.Depexts
 end
 
@@ -90,6 +91,12 @@ module Package_universe = struct
     | Dev_tool dev_tool ->
       Memo.return (Some (Dune_pkg.Lock_dir.dev_tool_lock_dir_path dev_tool))
   ;;
+
+  let to_dyn = function
+    | Project_dependencies ctx ->
+      Dyn.variant "Project_dependencies" [ Context_name.to_dyn ctx ]
+    | Dev_tool dev_tool -> Dyn.variant "Dev_tool" [ Dune_pkg.Dev_tool.to_dyn dev_tool ]
+  ;;
 end
 
 module Paths = struct
@@ -144,19 +151,22 @@ module Paths = struct
     Path.Build.append_local t.extra_sources extra_source
   ;;
 
-  let make package_universe name =
-    let universe_root =
-      match (package_universe : Package_universe.t) with
-      | Dev_tool dev_tool -> Pkg_dev_tool.universe_install_path dev_tool
-      | Project_dependencies _ ->
-        let build_dir =
-          Path.Build.relative
-            Private_context.t.build_dir
-            (Context_name.to_string (Package_universe.context_name package_universe))
-        in
-        Path.Build.relative build_dir ".pkg"
+  let make slug context_name =
+    let root =
+      Path.Build.relative
+        (Path.Build.relative
+           (Path.Build.relative
+              Private_context.t.build_dir
+              (Context_name.to_string context_name))
+           ".pkg")
+        (Pkg_slug.to_string slug)
     in
-    let root = Path.Build.relative universe_root (Package.Name.to_string name) in
+    of_root (Pkg_slug.name slug) ~root
+  ;;
+
+  let make_dev_tool dev_tool =
+    let root = Pkg_dev_tool.universe_install_path dev_tool in
+    let name = Pkg_dev_tool.package_name dev_tool in
     of_root name ~root
   ;;
 
@@ -350,6 +360,7 @@ module Pkg = struct
     ; paths : Path.t Paths.t
     ; write_paths : Path.Build.t Paths.t
     ; files_dir : Path.Build.t
+    ; slug : Pkg_slug.t
     ; mutable exported_env : string Env_update.t list
     }
 
@@ -1094,21 +1105,27 @@ module DB = struct
   type t =
     { all : Lock_dir.Pkg.t Package.Name.Map.t
     ; system_provided : Package.Name.Set.t
+    ; package_universe : Package_universe.t
     }
 
-  let equal t { all; system_provided } =
+  let equal t { all; system_provided; package_universe } =
     Package.Name.Map.equal ~equal:Lock_dir.Pkg.equal t.all all
     && Package.Name.Set.equal t.system_provided system_provided
+    && Package_universe.equal t.package_universe package_universe
   ;;
 
-  let hash { all; system_provided } =
+  let hash { all; system_provided; package_universe } =
+    let package_universe_hash = Package_universe.hash package_universe in
     let hash_all =
-      Package.Name.Map.foldi all ~init:0 ~f:(fun key value running_hash ->
-        Tuple.T3.hash
-          Package.Name.hash
-          Lock_dir.Pkg.hash
-          Int.hash
-          (key, value, running_hash))
+      Package.Name.Map.foldi
+        all
+        ~init:package_universe_hash
+        ~f:(fun key value running_hash ->
+          Tuple.T3.hash
+            Package.Name.hash
+            Lock_dir.Pkg.hash
+            Int.hash
+            (key, value, running_hash))
     in
     Package.Name.Set.fold system_provided ~init:hash_all ~f:(fun name running_hash ->
       Tuple.T2.hash Package.Name.hash Int.hash (name, running_hash))
@@ -1119,7 +1136,7 @@ module DB = struct
     let+ lock_dir = Package_universe.lock_dir package_universe
     and+ solver_env = Lock_dir.Sys_vars.solver_env () in
     let all = Dune_pkg.Lock_dir.packages_on_platform lock_dir ~platform:solver_env in
-    { all; system_provided = dune }
+    { all; system_provided = dune; package_universe }
   ;;
 end
 
@@ -1154,7 +1171,13 @@ end = struct
 
   let resolve_impl { Input.db; package = name; universe = package_universe } =
     match Package.Name.Map.find db.all name with
-    | None -> Memo.return None
+    | None ->
+      print_endline
+        (sprintf
+           "ggg %s fff %s"
+           (Package.Name.to_string name)
+           (Package.Name.Map.to_dyn Lock_dir.Pkg.to_dyn db.all |> Dyn.to_string));
+      Memo.return None
     | Some
         ({ Lock_dir.Pkg.build_command
          ; install_command
@@ -1163,6 +1186,7 @@ end = struct
          ; exported_env
          ; depexts
          ; enabled_on_platforms = _
+         ; slug = _
          } as pkg) ->
       assert (Package.Name.equal name info.name);
       let* platform = Lock_dir.Sys_vars.solver_env () in
@@ -1212,7 +1236,13 @@ end = struct
         | In_build_dir s -> Path.Build.append build_path s
       in
       let id = Pkg.Id.gen () in
-      let write_paths = Paths.make package_universe name ~relative:Path.Build.relative in
+      let slug = Lazy.force (Option.value_exn pkg.slug) in
+      let write_paths =
+        Paths.make
+          slug
+          (Package_universe.context_name package_universe)
+          ~relative:Path.Build.relative
+      in
       let install_command = choose_for_current_platform install_command in
       let build_command = choose_for_current_platform build_command in
       let paths =
@@ -1251,6 +1281,7 @@ end = struct
         ; write_paths
         ; info
         ; files_dir
+        ; slug
         ; exported_env = []
         }
       in
@@ -1283,7 +1314,11 @@ end = struct
         | None ->
           User_error.raise
             ~loc
-            [ Pp.textf "Unknown package %S" (Package.Name.to_string name) ]
+            [ Pp.textf
+                "Unknown package %S (looked in %s)"
+                (Package.Name.to_string name)
+                (Package_universe.to_dyn package_universe |> Dyn.to_string)
+            ]
   ;;
 end
 
@@ -1894,9 +1929,12 @@ let setup_pkg_install_alias =
          and+ platform = Lock_dir.Sys_vars.solver_env () in
          Dune_pkg.Lock_dir.Packages.pkgs_on_platform_by_name lock_dir.packages ~platform)
     in
-    Dune_lang.Package_name.Map.keys packages
-    |> List.map ~f:(fun pkg ->
-      Paths.make ~relative:Path.Build.relative project_deps pkg
+    Dune_lang.Package_name.Map.values packages
+    |> List.map ~f:(fun (pkg : Lock_dir.Pkg.t) ->
+      Paths.make
+        ~relative:Path.Build.relative
+        (Lazy.force (Option.value_exn pkg.slug))
+        ctx_name
       |> Paths.target_dir
       |> Path.build)
     |> Action_builder.paths
@@ -1939,7 +1977,12 @@ let setup_package_rules ~package_universe ~dir ~pkg_name : Gen_rules.result Memo
             (Package.Name.to_string name)
         ]
   in
-  let paths = Paths.make package_universe name ~relative:Path.Build.relative in
+  let paths =
+    match (package_universe : Package_universe.t) with
+    | Project_dependencies context_name ->
+      Paths.make pkg.slug context_name ~relative:Path.Build.relative
+    | Dev_tool dev_tool -> Paths.make_dev_tool dev_tool ~relative:Path.Build.relative
+  in
   let+ directory_targets =
     let map =
       let target_dir = paths.target_dir in
@@ -1969,12 +2012,14 @@ let setup_rules ~components ~dir ctx =
      the value of [Pkg_dev_tool.install_path_base_dir_name]. *)
   assert (String.equal Pkg_dev_tool.install_path_base_dir_name ".dev-tool");
   match Context_name.is_default ctx, components with
-  | true, [ ".dev-tool"; pkg_name; pkg_dep_name ] ->
+  | true, [ ".dev-tool"; dev_tool_package_name ] ->
     setup_package_rules
       ~package_universe:
-        (Dev_tool (Package.Name.of_string pkg_name |> Dune_pkg.Dev_tool.of_package_name))
+        (Dev_tool
+           (Package.Name.of_string dev_tool_package_name
+            |> Dune_pkg.Dev_tool.of_package_name))
       ~dir
-      ~pkg_name:pkg_dep_name
+      ~pkg_name:dev_tool_package_name
   | true, [ ".dev-tool" ] ->
     Gen_rules.make
       ~build_dir_only_sub_dirs:
@@ -1987,8 +2032,12 @@ let setup_rules ~components ~dir ctx =
         (Gen_rules.Build_only_sub_dirs.singleton ~dir Subdir_set.all)
       (Memo.return Rules.empty)
     |> Memo.return
-  | _, [ ".pkg"; pkg_name ] ->
-    setup_package_rules ~package_universe:(Project_dependencies ctx) ~dir ~pkg_name
+  | _, [ ".pkg"; slug_string ] ->
+    let slug = Pkg_slug.of_string slug_string in
+    setup_package_rules
+      ~package_universe:(Project_dependencies ctx)
+      ~dir
+      ~pkg_name:(Pkg_slug.name slug |> Dune_pkg.Package_name.to_string)
   | _, ".pkg" :: _ :: _ ->
     Memo.return @@ Gen_rules.redirect_to_parent Gen_rules.Rules.empty
   | true, ".dev-tool" :: _ :: _ :: _ ->

@@ -516,6 +516,45 @@ module Depexts = struct
   let remove_locs t = { t with enabled_if = Enabled_if.remove_locs t.enabled_if }
 end
 
+module Pkg_slug = struct
+  type t =
+    { name : Package_name.t
+    ; version : Package_version.t
+    ; lockfile_and_dependency_digest : Dune_digest.t
+      (* A hash of the package's lockfile as well as of all lockfiles of the dependency closure of the package. *)
+    }
+
+  let to_string { name; version; lockfile_and_dependency_digest } =
+    sprintf
+      "%s.%s-%s"
+      (Package_name.to_string name)
+      (Package_version.to_string version)
+      (Dune_digest.to_string lockfile_and_dependency_digest)
+  ;;
+
+  let of_string s =
+    let parse_error msg =
+      User_error.raise [ Pp.textf "Failed to parse %S as a package slug." s; msg ]
+    in
+    match String.lsplit2 s ~on:'.' with
+    | Some (name, rest) ->
+      (match String.rsplit2 rest ~on:'-' with
+       | Some (version, lockfile_and_dependency_digest) ->
+         (match Dune_digest.from_hex lockfile_and_dependency_digest with
+          | Some lockfile_and_dependency_digest ->
+            let name = Package_name.of_string name in
+            let version = Package_version.of_string version in
+            { name; version; lockfile_and_dependency_digest }
+          | None ->
+            parse_error
+              (Pp.textf "Failed to parse %S as digest" lockfile_and_dependency_digest))
+       | None -> parse_error (Pp.text "Missing '-' between version and lockfile digest."))
+    | None -> parse_error (Pp.text "Missing '.' between name and version.")
+  ;;
+
+  let name t = t.name
+end
+
 module Pkg = struct
   type t =
     { build_command : Build_command.t Conditional_choice.t
@@ -525,6 +564,7 @@ module Pkg = struct
     ; info : Pkg_info.t
     ; exported_env : String_with_vars.t Action.Env_update.t list
     ; enabled_on_platforms : Solver_env_disjunction.t
+    ; slug : Pkg_slug.t Lazy.t option
     }
 
   let equal
@@ -535,6 +575,7 @@ module Pkg = struct
         ; info
         ; exported_env
         ; enabled_on_platforms
+        ; slug = _
         }
         t
     =
@@ -559,6 +600,7 @@ module Pkg = struct
         ; info
         ; exported_env
         ; enabled_on_platforms
+        ; slug = _
         }
     =
     Poly.hash
@@ -580,6 +622,7 @@ module Pkg = struct
         ; info
         ; exported_env
         ; enabled_on_platforms
+        ; slug = _
         }
     =
     Conditional_choice.digest_feed Digest_feed.generic hasher build_command;
@@ -599,6 +642,7 @@ module Pkg = struct
         ; info
         ; exported_env
         ; enabled_on_platforms
+        ; slug
         }
     =
     { info = Pkg_info.remove_locs info
@@ -609,6 +653,7 @@ module Pkg = struct
     ; build_command = Conditional_choice.map build_command ~f:Build_command.remove_locs
     ; install_command = Conditional_choice.map install_command ~f:Action.remove_locs
     ; enabled_on_platforms
+    ; slug
     }
   ;;
 
@@ -620,6 +665,7 @@ module Pkg = struct
         ; info
         ; exported_env
         ; enabled_on_platforms
+        ; slug
         }
     =
     Dyn.record
@@ -631,6 +677,7 @@ module Pkg = struct
       ; ( "exported_env"
         , Dyn.list (Action.Env_update.to_dyn String_with_vars.to_dyn) exported_env )
       ; "enabled_on_platforms", Solver_env_disjunction.to_dyn enabled_on_platforms
+      ; "slug", Dyn.opaque slug
       ]
   ;;
 
@@ -750,6 +797,7 @@ module Pkg = struct
          ; info
          ; exported_env
          ; enabled_on_platforms
+         ; slug = None
          }
   ;;
 
@@ -770,6 +818,7 @@ module Pkg = struct
         ; info = { Pkg_info.name = _; extra_sources; version; dev; avoid; source }
         ; exported_env
         ; enabled_on_platforms
+        ; slug = _
         }
     =
     let open Encoder in
@@ -909,6 +958,8 @@ module Pkg = struct
     List.is_empty t.enabled_on_platforms
     || Solver_env_disjunction.matches_platform t.enabled_on_platforms ~platform
   ;;
+
+  let slug t = Lazy.force (Option.value_exn t.slug)
 end
 
 module Repositories = struct
@@ -959,6 +1010,7 @@ end
 module Packages = struct
   type t = Pkg.t Package_version.Map.t Package_name.Map.t
 
+  let empty = Package_name.Map.empty
   let remove_locs = Package_name.Map.map ~f:(Package_version.Map.map ~f:Pkg.remove_locs)
   let equal = Package_name.Map.equal ~equal:(Package_version.Map.equal ~equal:Pkg.equal)
   let to_dyn = Package_name.Map.to_dyn (Package_version.Map.to_dyn Pkg.to_dyn)
@@ -1618,6 +1670,7 @@ struct
         | Some x -> true, x
         | None -> false, (Loc.none, [])
       in
+      let packages_cell = ref Packages.empty in
       let+ packages =
         Io.readdir_with_kinds lock_dir_path
         >>| List.filter_map ~f:(fun (name, (kind : Unix.file_kind)) ->
@@ -1637,9 +1690,58 @@ struct
               package_name
               maybe_package_version
           in
-          pkg)
+          let slug =
+            lazy
+              (let packages = !packages_cell in
+               let iter_all_versions_of_non_dune_dependencies f =
+                 List.iter pkg.depends ~f:(fun { Conditional.value = depends; _ } ->
+                   List.iter depends ~f:(fun { Dependency.name = dep_name; _ } ->
+                     (* Don't call [f] on a dependency on the dune package
+                        itself as these aren't stored in the lockdir. *)
+                     if not (String.equal (Package_name.to_string dep_name) "dune")
+                     then (
+                       let dep_version_map =
+                         (* This is a map rather than a single package because when
+                            portable lockdirs are enabled there may be several
+                            different versions of a package in the lockdir. Since
+                            we don't know the user's platform here, err on the side
+                            of caution and hash all versions of the dependency. *)
+                         Package_name.Map.find_exn packages dep_name
+                       in
+                       Package_version.Map.iter dep_version_map ~f)))
+               in
+               (* Force the computation of the slugs of this package's
+                  dependencies. This needs to happen before the call to
+                  [Digest_feed.compute_digest_with_hasher] because the hasher is
+                  a singleton. *)
+               iter_all_versions_of_non_dune_dependencies (fun dep ->
+                 let _dep_slug : Pkg_slug.t = Pkg.slug dep in
+                 ());
+               let lockfile_and_dependency_digest =
+                 Digest_feed.compute_digest_with_hasher (fun hasher ->
+                   (* Compute the digest of the lockfile. Note that
+                      [Pkg.digest_feed does not force the [slug] field. *)
+                   Pkg.digest_feed hasher pkg;
+                   (* Evaluate the slugs for the transitive dependency closure
+                      of this package, and feed the digests from the slugs of
+                      the immediate dependencies into the current hasher.
+                      Because the digest of one package is influenced by its
+                      dependencies, this will cause the digest of the current
+                      package to be influenced by its entire dependency
+                      closure. *)
+                   iter_all_versions_of_non_dune_dependencies (fun dep ->
+                     let dep_slug = Pkg.slug dep in
+                     Digest_feed.digest hasher dep_slug.lockfile_and_dependency_digest))
+               in
+               { Pkg_slug.name = pkg.info.name
+               ; version = pkg.info.version
+               ; lockfile_and_dependency_digest
+               })
+          in
+          { pkg with slug = Some slug })
         >>| Packages.of_pkg_list
       in
+      packages_cell := packages;
       check_packages packages ~lock_dir_path
       |> Result.map ~f:(fun () ->
         { version

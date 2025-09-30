@@ -17,3 +17,6 @@ val exe_path : t -> Path.Build.t
 
 (** The path to the lib directory associated with the given dev tool *)
 val lib_path : t -> Path.Build.t
+
+val package_install_path' : t -> Dune_pkg.Lock_dir.Pkg_slug.t -> Path.Build.t
+val exe_path' : t -> Dune_pkg.Lock_dir.Pkg_slug.t -> Path.Build.t
