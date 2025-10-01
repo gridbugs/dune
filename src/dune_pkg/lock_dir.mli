@@ -60,9 +60,14 @@ module Pkg_slug : sig
       the interchangeably, even if they reside in different lockdirs. *)
   type t
 
+  val equal : t -> t -> bool
+  val hash : t -> int
   val to_string : t -> string
   val of_string : string -> t
   val name : t -> Package_name.t
+
+  include Comparable_intf.S with type key := t
+  module Table : Hashtbl.S with type key = t
 end
 
 module Pkg : sig

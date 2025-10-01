@@ -517,12 +517,48 @@ module Depexts = struct
 end
 
 module Pkg_slug = struct
-  type t =
-    { name : Package_name.t
-    ; version : Package_version.t
-    ; lockfile_and_dependency_digest : Dune_digest.t
-      (* A hash of the package's lockfile as well as of all lockfiles of the dependency closure of the package. *)
-    }
+  module T = struct
+    type t =
+      { name : Package_name.t
+      ; version : Package_version.t
+      ; lockfile_and_dependency_digest : Dune_digest.t
+        (* A hash of the package's lockfile as well as of all lockfiles of the dependency closure of the package. *)
+      }
+
+    let equal { name; version; lockfile_and_dependency_digest } t =
+      Package_name.equal name t.name
+      && Package_version.equal version t.version
+      && Dune_digest.equal lockfile_and_dependency_digest t.lockfile_and_dependency_digest
+    ;;
+
+    let compare { name; version; lockfile_and_dependency_digest } t =
+      let open Ordering.O in
+      let= () = Package_name.compare name t.name in
+      let= () = Package_version.compare version t.version in
+      Dune_digest.compare lockfile_and_dependency_digest t.lockfile_and_dependency_digest
+    ;;
+
+    let to_dyn { name; version; lockfile_and_dependency_digest } =
+      Dyn.record
+        [ "name", Package_name.to_dyn name
+        ; "version", Package_version.to_dyn version
+        ; ( "lockfile_and_dependency_digest"
+          , Dune_digest.to_dyn lockfile_and_dependency_digest )
+        ]
+    ;;
+
+    let hash { name; version; lockfile_and_dependency_digest } =
+      Tuple.T3.hash
+        Package_name.hash
+        Package_version.hash
+        Dune_digest.hash
+        (name, version, lockfile_and_dependency_digest)
+    ;;
+  end
+
+  include T
+  include Comparable.Make (T)
+  module Table = Hashtbl.Make (T)
 
   let to_string { name; version; lockfile_and_dependency_digest } =
     sprintf
@@ -1693,6 +1729,9 @@ struct
           let slug =
             lazy
               (let packages = !packages_cell in
+               let debug =
+                 String.equal (Package_name.to_string pkg.info.name) "ocaml-compiler"
+               in
                let iter_all_versions_of_non_dune_dependencies f =
                  List.iter pkg.depends ~f:(fun { Conditional.value = depends; _ } ->
                    List.iter depends ~f:(fun { Dependency.name = dep_name; _ } ->
@@ -1721,7 +1760,7 @@ struct
                  Digest_feed.compute_digest_with_hasher (fun hasher ->
                    (* Compute the digest of the lockfile. Note that
                       [Pkg.digest_feed does not force the [slug] field. *)
-                   Pkg.digest_feed hasher pkg;
+                   Pkg.digest_feed hasher (Pkg.remove_locs pkg);
                    (* Evaluate the slugs for the transitive dependency closure
                       of this package, and feed the digests from the slugs of
                       the immediate dependencies into the current hasher.
@@ -1730,9 +1769,23 @@ struct
                       package to be influenced by its entire dependency
                       closure. *)
                    iter_all_versions_of_non_dune_dependencies (fun dep ->
+                     if debug
+                     then
+                       print_endline
+                         (sprintf
+                            "dep %s %s"
+                            (Path.to_string lock_dir_path)
+                            (Package_name.to_string dep.info.name));
                      let dep_slug = Pkg.slug dep in
                      Digest_feed.digest hasher dep_slug.lockfile_and_dependency_digest))
                in
+               if debug
+               then
+                 print_endline
+                   (sprintf
+                      "hash %s %s"
+                      (Path.to_string lock_dir_path)
+                      (Dune_digest.to_string lockfile_and_dependency_digest));
                { Pkg_slug.name = pkg.info.name
                ; version = pkg.info.version
                ; lockfile_and_dependency_digest
