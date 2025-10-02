@@ -237,23 +237,20 @@ module Paths = struct
     Path.Build.append_local t.extra_sources extra_source
   ;;
 
-  let make slug context_name =
+  let make slug universe =
     let root =
-      Path.Build.relative
-        (Path.Build.relative
-           (Path.Build.relative
-              Private_context.t.build_dir
-              (Context_name.to_string context_name))
-           ".pkg")
-        (Pkg_slug.to_string slug)
+      match (universe : Package_universe.t) with
+      | Project_dependencies ctx ->
+        Path.Build.relative
+          (Path.Build.relative
+             (Path.Build.relative
+                Private_context.t.build_dir
+                (Context_name.to_string ctx))
+             ".pkg")
+          (Pkg_slug.to_string slug)
+      | Dev_tool dev_tool -> Pkg_dev_tool.universe_install_path dev_tool
     in
     of_root (Pkg_slug.name slug) ~root
-  ;;
-
-  let make_dev_tool dev_tool =
-    let root = Pkg_dev_tool.universe_install_path dev_tool in
-    let name = Pkg_dev_tool.package_name dev_tool in
-    of_root name ~root
   ;;
 
   let make_install_cookie target_dir ~relative = relative target_dir "cookie"
@@ -589,7 +586,7 @@ end
 module Pkg_installed = struct
   type t = { cookie : Install_cookie.t Action_builder.t }
 
-  let of_paths (paths : _ Paths.t) =
+  let of_paths (paths : Path.t Paths.t) =
     let cookie =
       let open Action_builder.O in
       let path = Paths.install_cookie paths in
@@ -1282,6 +1279,11 @@ end = struct
       let* depends =
         Memo.parallel_map deps ~f:(fun { Slug_table.dep_pkg; dep_loc } ->
           let dep_slug = Lock_dir.Pkg.slug dep_pkg in
+          let package_universe =
+            match package_universe with
+            | Dev_tool _ -> Package_universe.Project_dependencies Context_name.default
+            | _ -> package_universe
+          in
           resolve db dep_loc dep_slug package_universe
           >>| function
           | `Inside_lock_dir pkg -> Some pkg
@@ -1323,12 +1325,7 @@ end = struct
       in
       let id = Pkg.Id.gen () in
       let slug = Lazy.force (Option.value_exn pkg.slug) in
-      let write_paths =
-        Paths.make
-          slug
-          (Package_universe.context_name package_universe)
-          ~relative:Path.Build.relative
-      in
+      let write_paths = Paths.make slug package_universe ~relative:Path.Build.relative in
       let install_command = choose_for_current_platform install_command in
       let build_command = choose_for_current_platform build_command in
       let paths =
@@ -2020,7 +2017,7 @@ let setup_pkg_install_alias =
       Paths.make
         ~relative:Path.Build.relative
         (Lazy.force (Option.value_exn pkg.slug))
-        ctx_name
+        (Project_dependencies ctx_name)
       |> Paths.target_dir
       |> Path.build)
     |> Action_builder.paths
@@ -2062,12 +2059,7 @@ let setup_package_rules ~package_universe ~dir ~slug : Gen_rules.result Memo.t =
             (Package.Name.to_string (Pkg_slug.name slug))
         ]
   in
-  let paths =
-    match (package_universe : Package_universe.t) with
-    | Project_dependencies context_name ->
-      Paths.make pkg.slug context_name ~relative:Path.Build.relative
-    | Dev_tool dev_tool -> Paths.make_dev_tool dev_tool ~relative:Path.Build.relative
-  in
+  let paths = Paths.make pkg.slug package_universe ~relative:Path.Build.relative in
   let+ directory_targets =
     let map =
       let target_dir = paths.target_dir in

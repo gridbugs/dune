@@ -8,7 +8,7 @@ let add_dev_tools_to_path env =
     Env_path.cons acc ~dir)
 ;;
 
-let dev_tool_slug dev_tool =
+let _dev_tool_slug dev_tool =
   let open Fiber.O in
   let+ platform = Pkg.Pkg_common.poll_solver_env_from_current_system () in
   let pkgs =
@@ -19,25 +19,21 @@ let dev_tool_slug dev_tool =
   Lock_dir.Pkg.slug pkg
 ;;
 
-let dev_tool_exe_path dev_tool =
-  let open Fiber.O in
-  let+ slug = dev_tool_slug dev_tool in
-  Path.build @@ Pkg_dev_tool.exe_path' dev_tool slug
-;;
+let dev_tool_exe_path dev_tool = Path.build @@ Pkg_dev_tool.exe_path dev_tool
 
 let dev_tool_build_target dev_tool =
-  let open Fiber.O in
-  let+ exe_path = dev_tool_exe_path dev_tool in
   Dune_lang.Dep_conf.File
-    (Dune_lang.String_with_vars.make_text Loc.none (Path.to_string exe_path))
+    (Dune_lang.String_with_vars.make_text
+       Loc.none
+       (Path.to_string (dev_tool_exe_path dev_tool)))
 ;;
 
 let build_dev_tool_directly common dev_tool =
   let open Fiber.O in
-  let* exe_path = dev_tool_exe_path dev_tool in
+  let exe_path = Pkg_dev_tool.exe_path dev_tool in
   let+ result =
     Build.run_build_system ~common ~request:(fun _build_system ->
-      Action_builder.path exe_path)
+      Action_builder.path (Path.build exe_path))
   in
   match result with
   | Error `Already_reported -> raise Dune_util.Report_error.Already_reported
@@ -45,8 +41,7 @@ let build_dev_tool_directly common dev_tool =
 ;;
 
 let build_dev_tool_via_rpc dev_tool =
-  let open Fiber.O in
-  let* target = dev_tool_build_target dev_tool in
+  let target = dev_tool_build_target dev_tool in
   Build.build_via_rpc_server ~print_on_success:false ~targets:[ target ]
 ;;
 
@@ -64,10 +59,8 @@ let lock_and_build_dev_tool ~common ~config dev_tool =
 ;;
 
 let run_dev_tool workspace_root dev_tool ~args =
-  let open Fiber.O in
   let exe_name = Pkg_dev_tool.exe_name dev_tool in
-  let exe_path = failwith "todo" in
-  let exe_path_string = Path.to_string exe_path in
+  let exe_path_string = Path.to_string (dev_tool_exe_path dev_tool) in
   Console.print_user_message
     (Dune_rules.Pkg_build_progress.format_user_message
        ~verb:"Running"
@@ -100,13 +93,9 @@ let which_command dev_tool =
                  exe_name))
     in
     let _ : Common.t * Dune_config_file.Dune_config.t = Common.init builder in
-    (*
-       if allow_not_installed || Path.exists exe_path
+    if allow_not_installed || Path.exists exe_path
     then print_endline (Path.to_string exe_path)
     else User_error.raise [ Pp.textf "%s is not installed as a dev tool" exe_name ]
-    *)
-    let _ = failwith "todo" in
-    ()
   in
   let info =
     let doc =

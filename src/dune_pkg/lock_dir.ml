@@ -1729,9 +1729,6 @@ struct
           let slug =
             lazy
               (let packages = !packages_cell in
-               let debug =
-                 String.equal (Package_name.to_string pkg.info.name) "ocaml-compiler"
-               in
                let iter_all_versions_of_non_dune_dependencies f =
                  List.iter pkg.depends ~f:(fun { Conditional.value = depends; _ } ->
                    List.iter depends ~f:(fun { Dependency.name = dep_name; _ } ->
@@ -1769,23 +1766,9 @@ struct
                       package to be influenced by its entire dependency
                       closure. *)
                    iter_all_versions_of_non_dune_dependencies (fun dep ->
-                     if debug
-                     then
-                       print_endline
-                         (sprintf
-                            "dep %s %s"
-                            (Path.to_string lock_dir_path)
-                            (Package_name.to_string dep.info.name));
                      let dep_slug = Pkg.slug dep in
                      Digest_feed.digest hasher dep_slug.lockfile_and_dependency_digest))
                in
-               if debug
-               then
-                 print_endline
-                   (sprintf
-                      "hash %s %s"
-                      (Path.to_string lock_dir_path)
-                      (Dune_digest.to_string lockfile_and_dependency_digest));
                { Pkg_slug.name = pkg.info.name
                ; version = pkg.info.version
                ; lockfile_and_dependency_digest
