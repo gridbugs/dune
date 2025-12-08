@@ -15,6 +15,7 @@ let subcommands =
   ; Pkg_enabled.command
   ; Print_digest.command
   ; Search.command
+  ; Offline_info.command
   ]
 ;;
 

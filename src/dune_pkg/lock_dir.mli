@@ -82,6 +82,8 @@ end
 
 module Repositories : sig
   type t
+
+  val to_dyn : t -> Dyn.t
 end
 
 module Packages : sig
